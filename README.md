@@ -2,19 +2,19 @@
 
 ## Mục lục
 
-- [1. Mô tả Bài toán](#1-mô-tả-bài-toán)
-- [2. Luồng Xử lý Dữ liệu](#2-luồng-xử-lý-dữ-liệu-data-processing-pipeline)
-- [3. Kiến trúc Hệ thống](#3-kiến-trúc-hệ-thống)
-- [4. Cấu trúc Dự án](#4-cấu-trúc-dự-án)
-- [5. Cài đặt & Chạy](#5-cài-đặt--chạy)
-- [6. Cấu hình](#6-cấu-hình-configpy)
-- [7. Hệ thống Labels & Nhãn dữ liệu](#7-hệ-thống-labels--nhãn-dữ-liệu)
-- [8. Phân tích Thuật toán](#8-phân-tích-thuật-toán)
-- [9. Tài liệu Chi tiết](#9-tài-liệu-chi-tiết)
-- [10. Output mẫu](#10-output-mẫu)
+- [1. Mô tả Bài toán](#1-mô-tả-bài-toán) — Hệ thống này giải quyết gì?
+- [2. Demo nhanh](#2-demo-nhanh--output-mẫu) — Kết quả trông thế nào?
+- [3. Cài đặt & Chạy](#3-cài-đặt--chạy) — Chạy thử trong 3 lệnh
+- [4. Kiến trúc Hệ thống](#4-kiến-trúc-hệ-thống) — Bức tranh toàn cảnh 7 phase
+- [5. Luồng Xử lý Dữ liệu](#5-luồng-xử-lý-dữ-liệu-data-processing-pipeline) — Đi sâu từng bước
+- [6. Cấu trúc Dự án](#6-cấu-trúc-dự-án) — Code nằm ở đâu?
+- [7. Cấu hình](#7-cấu-hình-configpy) — Tinh chỉnh tham số
+- [8. Hệ thống Labels](#8-hệ-thống-labels--nhãn-dữ-liệu) — Hiểu điểm số
+- [9. Phân tích Thuật toán](#9-phân-tích-thuật-toán) — Hiểu vì sao lại chấm thế
+- [10. Tài liệu Chi tiết](#10-tài-liệu-chi-tiết) — Đọc tiếp ở đâu?
 - [⚠️ Disclaimer & Hạn chế](#️-disclaimer)
 
-> Sơ đồ Mermaid chi tiết 7 phase xem tại [implementation_plan.md](implementation_plan.md) — đây là nguồn duy nhất (single source) cho kiến trúc. Sơ đồ ASCII bên dưới chỉ để đọc nhanh.
+> Sơ đồ Mermaid chi tiết 7 phase xem tại [implementation_plan.md](implementation_plan.md) — đây là nguồn duy nhất (single source) cho kiến trúc.
 
 ## 1. Mô tả Bài toán
 
@@ -48,9 +48,124 @@ Xây dựng **Hệ thống Hỗ trợ Quyết định (Decision Support System �
 
 ---
 
-## 2. Luồng Xử lý Dữ liệu (Data Processing Pipeline)
+## 2. Demo nhanh — Output mẫu
 
-### 2.1. Tổng quan Pipeline
+> Đọc 30 giây để biết hệ thống trả về gì, rồi mới quyết định đọc tiếp hay chạy thử ở §3.
+
+Khớp với `src/decision.py: print_terminal_report` — 7 cột: MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO.
+Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn để đọc trên GitHub:
+
+| MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO |
+|---|---|---|---|---|---|---|
+| FPT | 72,200 đ | 72.0 | 71.0 | 73.5 | 🟡 MUA | RSI phục hồi; MACD tích cực |
+| TCB | 48,600 đ | 51.0 | 50.0 | 52.5 | ⚪ GIỮ | Sideway, chờ breakout |
+| HPG | 26,100 đ | 32.0 | 22.0 | 47.0 | 🟠 BÁN | Death cross; volume giảm |
+
+> Tổng điểm = 60% Rules + 40% ML Ensemble (RF + XGBoost).
+
+---
+
+## 3. Cài đặt & Chạy
+
+> Thấy output ở §2 rồi? Chạy thật chỉ cần 3 lệnh. Hiểu bên trong thì đọc tiếp §4–§5 sau.
+
+### Cách 1: Dùng `run.sh` (Khuyến nghị)
+
+```bash
+# Lần đầu: setup môi trường + cài thư viện
+./run.sh setup
+
+# Tải data VN30
+./run.sh fetch
+
+# Chạy khuyến nghị hôm nay
+./run.sh dss
+
+# Chạy backtest 6 tháng
+./run.sh backtest
+
+# Kiểm tra trạng thái dự án
+./run.sh status
+
+# Xem tất cả lệnh
+./run.sh help
+```
+
+### Cách 2: Chạy thủ công
+
+```bash
+# 1. Cài thư viện
+pip install -r requirements.txt
+
+# 2. Tải dữ liệu VN30
+python src/data_fetcher.py
+
+# 3. Chạy khuyến nghị
+python main.py
+
+# 4. Chạy backtest
+python backtest_runner.py
+```
+
+---
+
+## 4. Kiến trúc Hệ thống
+
+> Bức tranh toàn cảnh trước, chi tiết từng bước xem ở §5. Bản Mermaid chuẩn 7 phase nằm ở [implementation_plan.md §1](implementation_plan.md#1-kiến-trúc-tổng-quan-toàn-hệ-thống). Sơ đồ dưới đây là bản rút gọn để đọc nhanh.
+
+```mermaid
+flowchart TD
+    SCAN["Quét rổ VN30 từ vnstock"] --> P1["Phase 1: Lấy Data OHLCV<br/>30 mã x 750 phiên + VNINDEX"]
+    P1 --> P2["Phase 2: Cleaning<br/>Missing + Outlier >6.8%"]
+    P2 --> P3["Phase 3: Indicators<br/>SMA EMA MACD RSI BB ATR OBV"]
+    P3 --> P4["Phase 4: Features<br/>19 features + Label T+5"]
+    P4 --> P5["Phase 5: ML<br/>RF + XGB → ML Score 40%"]
+    P4 --> P6["Phase 6: Rules<br/>5 nhóm TA → Rule Score 60%"]
+    P5 --> TOTAL["Total = 60% Rule + 40% ML"]
+    P6 --> TOTAL
+    TOTAL --> REC["Bảng khuyến nghị<br/>5 mức tín hiệu"]
+    TOTAL --> BT["Phase 7: Backtest<br/>vs Buy and Hold"]
+```
+
+### Thuật toán Machine Learning
+
+| Thuật toán | Vai trò | Cơ chế |
+|-----------|---------|--------|
+| **Random Forest** | "Phòng thủ" — Ổn định, chống nhiễu | 200 cây quyết định song song (Bagging), bỏ phiếu đa số |
+| **XGBoost** | "Tấn công" — Nhạy bén, bắt pattern tinh vi | 300 cây tuần tự (Boosting), mỗi cây sửa lỗi cây trước |
+| **Ensemble** | Trung bình xác suất 2 model | `ML Score = P(MUA) × 100` |
+| **Rule-Based** | "Trọng tài" — Kiểm tra logic TA cơ bản | Chấm điểm 5 nhóm: Trend 30%, Momentum 25%, Volume 20%, Volatility 15%, Market 10% |
+
+### Tín hiệu đầu ra
+
+| Signal | Điểm | Ý nghĩa |
+|--------|------|---------|
+| 🟢 **MUA MẠNH** | ≥ 75 | Cả ML và Rules đều tích cực mạnh |
+| 🟡 **MUA** | 60–74 | Phần lớn chỉ báo tích cực |
+| ⚪ **GIỮ** | 40–59 | Tín hiệu trái chiều, chưa rõ xu hướng |
+| 🟠 **BÁN** | 25–39 | Phần lớn chỉ báo tiêu cực |
+| 🔴 **BÁN MẠNH** | < 25 | Cả ML và Rules đều cảnh báo rủi ro |
+
+```mermaid
+flowchart LR
+    SCORE["Total Score 0-100<br/>60% Rule + 40% ML"] --> G1{"≥ 75?"}
+    G1 -->|Yes| BUY2["MUA MẠNH"]
+    G1 -->|No| G2{"≥ 60?"}
+    G2 -->|Yes| BUY["MUA"]
+    G2 -->|No| G3{"≥ 40?"}
+    G3 -->|Yes| HOLD["GIỮ"]
+    G3 -->|No| G4{"≥ 25?"}
+    G4 -->|Yes| SELL["BÁN"]
+    G4 -->|No| SELL2["BÁN MẠNH"]
+```
+
+---
+
+## 5. Luồng Xử lý Dữ liệu (Data Processing Pipeline)
+
+> Đã có big picture ở §4, giờ đi sâu từng phase làm gì với dữ liệu.
+
+### 5.1. Tổng quan Pipeline
 
 ```mermaid
 flowchart LR
@@ -59,7 +174,7 @@ flowchart LR
     FEAT --> DEC["Quyết định<br/>Score 0-100<br/>Signal 5 mức<br/>Lý do"]
 ```
 
-### 2.2. Chi tiết từng bước xử lý
+### 5.2. Chi tiết từng bước xử lý
 
 #### Bước 1: Thu thập dữ liệu thô (Phase 1 — `data_fetcher.py`)
 
@@ -130,59 +245,9 @@ flowchart LR
 
 ---
 
-## 3. Kiến trúc Hệ thống
+## 6. Cấu trúc Dự án
 
-> Bản Mermaid chuẩn 7 phase nằm ở [implementation_plan.md §1](implementation_plan.md#1-kiến-trúc-tổng-quan-toàn-hệ-thống). Sơ đồ dưới đây là bản rút gọn để đọc nhanh.
-
-```mermaid
-flowchart TD
-    SCAN["Quét rổ VN30 từ vnstock"] --> P1["Phase 1: Lấy Data OHLCV<br/>30 mã x 750 phiên + VNINDEX"]
-    P1 --> P2["Phase 2: Cleaning<br/>Missing + Outlier >6.8%"]
-    P2 --> P3["Phase 3: Indicators<br/>SMA EMA MACD RSI BB ATR OBV"]
-    P3 --> P4["Phase 4: Features<br/>19 features + Label T+5"]
-    P4 --> P5["Phase 5: ML<br/>RF + XGB → ML Score 40%"]
-    P4 --> P6["Phase 6: Rules<br/>5 nhóm TA → Rule Score 60%"]
-    P5 --> TOTAL["Total = 60% Rule + 40% ML"]
-    P6 --> TOTAL
-    TOTAL --> REC["Bảng khuyến nghị<br/>5 mức tín hiệu"]
-    TOTAL --> BT["Phase 7: Backtest<br/>vs Buy and Hold"]
-```
-
-### Thuật toán Machine Learning
-
-| Thuật toán | Vai trò | Cơ chế |
-|-----------|---------|--------|
-| **Random Forest** | "Phòng thủ" — Ổn định, chống nhiễu | 200 cây quyết định song song (Bagging), bỏ phiếu đa số |
-| **XGBoost** | "Tấn công" — Nhạy bén, bắt pattern tinh vi | 300 cây tuần tự (Boosting), mỗi cây sửa lỗi cây trước |
-| **Ensemble** | Trung bình xác suất 2 model | `ML Score = P(MUA) × 100` |
-| **Rule-Based** | "Trọng tài" — Kiểm tra logic TA cơ bản | Chấm điểm 5 nhóm: Trend 30%, Momentum 25%, Volume 20%, Volatility 15%, Market 10% |
-
-### Tín hiệu đầu ra
-
-| Signal | Điểm | Ý nghĩa |
-|--------|------|---------|
-| 🟢 **MUA MẠNH** | ≥ 75 | Cả ML và Rules đều tích cực mạnh |
-| 🟡 **MUA** | 60–74 | Phần lớn chỉ báo tích cực |
-| ⚪ **GIỮ** | 40–59 | Tín hiệu trái chiều, chưa rõ xu hướng |
-| 🟠 **BÁN** | 25–39 | Phần lớn chỉ báo tiêu cực |
-| 🔴 **BÁN MẠNH** | < 25 | Cả ML và Rules đều cảnh báo rủi ro |
-
-```mermaid
-flowchart LR
-    SCORE["Total Score 0-100<br/>60% Rule + 40% ML"] --> G1{"≥ 75?"}
-    G1 -->|Yes| BUY2["MUA MẠNH"]
-    G1 -->|No| G2{"≥ 60?"}
-    G2 -->|Yes| BUY["MUA"]
-    G2 -->|No| G3{"≥ 40?"}
-    G3 -->|Yes| HOLD["GIỮ"]
-    G3 -->|No| G4{"≥ 25?"}
-    G4 -->|Yes| SELL["BÁN"]
-    G4 -->|No| SELL2["BÁN MẠNH"]
-```
-
----
-
-## 4. Cấu trúc Dự án
+> Hiểu luồng §4–§5 rồi thì mở code theo bản đồ này.
 
 ```
 DSS/
@@ -212,49 +277,9 @@ DSS/
 
 ---
 
-## 5. Cài đặt & Chạy
+## 7. Cấu hình (`config.py`)
 
-### Cách 1: Dùng `run.sh` (Khuyến nghị)
-
-```bash
-# Lần đầu: setup môi trường + cài thư viện
-./run.sh setup
-
-# Tải data VN30
-./run.sh fetch
-
-# Chạy khuyến nghị hôm nay
-./run.sh dss
-
-# Chạy backtest 6 tháng
-./run.sh backtest
-
-# Kiểm tra trạng thái dự án
-./run.sh status
-
-# Xem tất cả lệnh
-./run.sh help
-```
-
-### Cách 2: Chạy thủ công
-
-```bash
-# 1. Cài thư viện
-pip install -r requirements.txt
-
-# 2. Tải dữ liệu VN30
-python src/data_fetcher.py
-
-# 3. Chạy khuyến nghị
-python main.py
-
-# 4. Chạy backtest
-python backtest_runner.py
-```
-
----
-
-## 6. Cấu hình (`config.py`)
+> Chạy mặc định ổn rồi mới tinh chỉnh ở đây.
 
 | Tham số | Mặc định | Ý nghĩa |
 |---------|----------|---------|
@@ -272,11 +297,11 @@ python backtest_runner.py
 
 ---
 
-## 7. Hệ thống Labels & Nhãn dữ liệu
+## 8. Hệ thống Labels & Nhãn dữ liệu
 
-> Chi tiết đầy đủ xem tại [dss_labels_reference.md](dss_labels_reference.md)
+> Tóm tắt để hiểu điểm số. Chi tiết đầy đủ xem tại [dss_labels_reference.md](dss_labels_reference.md)
 
-### 7.1. Nhãn huấn luyện ML (Phase 4)
+### 8.1. Nhãn huấn luyện ML (Phase 4)
 
 Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho dữ liệu huấn luyện:
 
@@ -290,7 +315,7 @@ Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho 
 - **Tại sao ±3%?** Đủ để bù chi phí giao dịch (phí mua bán ~0.15–0.35%) và vẫn có lãi ròng. Cân bằng giữa "đủ tín hiệu" và "đủ chính xác".
 - **Tại sao T+5?** Phù hợp swing trading, khớp quy tắc T+2 trên HOSE (mua → nhận T+2 → giữ 3 ngày → bán).
 
-### 7.2. Nhãn Rule-Based Scoring (Phase 6)
+### 8.2. Nhãn Rule-Based Scoring (Phase 6)
 
 Điểm khởi đầu **50** (trung tính), cộng/trừ dựa trên 5 nhóm:
 
@@ -302,7 +327,7 @@ Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho 
 | **Biến động** | 15% | Bật tăng từ dải dưới BB: +8 | Chạm dải trên BB: -5 |
 | **VNINDEX** | 10% | Thị trường > SMA50: +5 | Thị trường sụt giảm mạnh: -5 |
 
-### 7.3. Bảng tổng hợp Labels toàn hệ thống
+### 8.3. Bảng tổng hợp Labels toàn hệ thống
 
 | Phase | Label | Giá trị | Ý nghĩa |
 |-------|-------|---------|---------|
@@ -320,11 +345,11 @@ Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho 
 
 ---
 
-## 8. Phân tích Thuật toán
+## 9. Phân tích Thuật toán
 
-> Chi tiết đầy đủ xem tại [dss_algorithm_analysis.md](dss_algorithm_analysis.md)
+> Tóm tắt để bảo vệ đồ án. Chi tiết đầy đủ xem tại [dss_algorithm_analysis.md](dss_algorithm_analysis.md)
 
-### 8.1. Cây Quyết Định — Nền tảng cơ bản
+### 9.1. Cây Quyết Định — Nền tảng cơ bản
 
 Cả Random Forest và XGBoost đều được xây từ nhiều **Cây Quyết Định (Decision Tree)** — thuật toán mô phỏng tư duy con người bằng cách đặt câu hỏi Yes/No liên tiếp (VD: *"RSI < 30?"* → *"Volume > 1.5x?"* → MUA).
 
@@ -337,7 +362,7 @@ IG(Feature) = Entropy(trước) - Entropy(sau khi chia)  →  Càng cao = featur
 
 Một cây đơn lẻ dễ bị **Overfitting** (nhớ thuộc dữ liệu cũ) → Giải pháp: kết hợp hàng trăm cây.
 
-### 8.2. Hai chiến lược kết hợp cây
+### 9.2. Hai chiến lược kết hợp cây
 
 | | Random Forest (Bagging) | XGBoost (Boosting) |
 |---|---|---|
@@ -347,7 +372,7 @@ Một cây đơn lẻ dễ bị **Overfitting** (nhớ thuộc dữ liệu cũ) 
 | **Rủi ro** | Bảo thủ, bỏ lỡ tín hiệu yếu | Dễ overfit nếu tham số sai |
 | **Vai trò** | "Phòng thủ" | "Tấn công" |
 
-### 8.3. Ensemble — Kết hợp bù đắp điểm mù
+### 9.3. Ensemble — Kết hợp bù đắp điểm mù
 
 ```
 Random Forest:  P(MUA) = 72%  ─┐
@@ -362,7 +387,7 @@ XGBoost:        P(MUA) = 78%  ─┘
 
 Khi 2 model **bất đồng**, Ensemble tự động **hạ confidence** → Hệ thống thận trọng hơn thay vì chọn bừa.
 
-### 8.4. Walk-Forward Validation
+### 9.4. Walk-Forward Validation
 
 ```
 ❌ Random Split:  Train và Test xen kẽ → Model nhìn vào TƯƠNG LAI → Kết quả ảo
@@ -371,7 +396,7 @@ Khi 2 model **bất đồng**, Ensemble tự động **hạ confidence** → H�
 
 Dữ liệu chuỗi thời gian **không được shuffle**. Model chỉ học từ quá khứ, kiểm tra trên dữ liệu gần nhất.
 
-### 8.5. Tổng điểm = 60% Rule + 40% ML
+### 9.5. Tổng điểm = 60% Rule + 40% ML
 
 | Thành phần | Trọng số | Lý do |
 |-----------|---------|-------|
@@ -386,7 +411,7 @@ Dữ liệu chuỗi thời gian **không được shuffle**. Model chỉ học t
 
 ---
 
-## 9. Tài liệu Chi tiết
+## 10. Tài liệu Chi tiết
 
 | Tài liệu | Nội dung | Khi nào đọc |
 |-----------|---------|-------------|
@@ -396,21 +421,6 @@ Dữ liệu chuỗi thời gian **không được shuffle**. Model chỉ học t
 | [DSS_FULL_CODE_GUIDE.md](DSS_FULL_CODE_GUIDE.md) | Snapshot code minh họa 7 phase (có thể lỗi thời) — source thật nằm ở `src/*.py` | Chỉ tham khảo, không copy |
 
 > `AGENTS.md` (root + `src/`) là boilerplate onboarding của `vnstock`, không phải tài liệu DSS — bỏ qua khi đọc/báo cáo.
-
----
-
-## 10. Output mẫu
-
-Khớp với `src/decision.py: print_terminal_report` — 7 cột: MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO.
-Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn để đọc trên GitHub:
-
-| MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO |
-|---|---|---|---|---|---|---|
-| FPT | 72,200 đ | 72.0 | 71.0 | 73.5 | 🟡 MUA | RSI phục hồi; MACD tích cực |
-| TCB | 48,600 đ | 51.0 | 50.0 | 52.5 | ⚪ GIỮ | Sideway, chờ breakout |
-| HPG | 26,100 đ | 32.0 | 22.0 | 47.0 | 🟠 BÁN | Death cross; volume giảm |
-
-> Tổng điểm = 60% Rules + 40% ML Ensemble (RF + XGBoost).
 
 ---
 
