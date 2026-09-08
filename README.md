@@ -1,5 +1,21 @@
 # 📈 DSS — Hệ thống Hỗ trợ Quyết định Mua Bán Cổ Phiếu (VN30)
 
+## Mục lục
+
+- [1. Mô tả Bài toán](#1-mô-tả-bài-toán)
+- [2. Luồng Xử lý Dữ liệu](#2-luồng-xử-lý-dữ-liệu-data-processing-pipeline)
+- [3. Kiến trúc Hệ thống](#3-kiến-trúc-hệ-thống)
+- [4. Cấu trúc Dự án](#4-cấu-trúc-dự-án)
+- [5. Cài đặt & Chạy](#5-cài-đặt--chạy)
+- [6. Cấu hình](#6-cấu-hình-configpy)
+- [7. Hệ thống Labels & Nhãn dữ liệu](#7-hệ-thống-labels--nhãn-dữ-liệu)
+- [8. Phân tích Thuật toán](#8-phân-tích-thuật-toán)
+- [9. Tài liệu Chi tiết](#9-tài-liệu-chi-tiết)
+- [10. Output mẫu](#10-output-mẫu)
+- [⚠️ Disclaimer & Hạn chế](#️-disclaimer)
+
+> Sơ đồ Mermaid chi tiết 7 phase xem tại [implementation_plan.md](implementation_plan.md) — đây là nguồn duy nhất (single source) cho kiến trúc. Sơ đồ ASCII bên dưới chỉ để đọc nhanh.
+
 ## 1. Mô tả Bài toán
 
 ### 1.1. Bối cảnh
@@ -15,7 +31,7 @@ Thị trường chứng khoán Việt Nam (HOSE) có hơn 1.500 mã cổ phiếu
 Xây dựng **Hệ thống Hỗ trợ Quyết định (Decision Support System — DSS)** kết hợp Phân tích Kỹ thuật (Technical Analysis) và Học máy (Machine Learning) nhằm:
 
 1. **Tự động thu thập** dữ liệu giá cổ phiếu rổ VN30 từ API `vnstock`.
-2. **Tính toán** 20+ chỉ báo kỹ thuật và biến đổi thành đặc trưng (features) cho mô hình ML.
+2. **Tính toán** 20+ chỉ báo kỹ thuật (mở rộng thành 25+ cột) rồi chắt lọc thành **19 features** cho mô hình ML.
 3. **Huấn luyện** mô hình phân loại (Random Forest + XGBoost) để dự đoán xu hướng ngắn hạn (T+5).
 4. **Kết hợp** điểm số từ quy tắc chuyên gia (60%) và Machine Learning (40%) để đưa ra tín hiệu giao dịch: **MUA MẠNH / MUA / GIỮ / BÁN / BÁN MẠNH**.
 5. **Kiểm chứng** hiệu suất bằng module Backtest, so sánh lợi nhuận với chiến lược Mua & Giữ (Buy & Hold).
@@ -36,112 +52,100 @@ Xây dựng **Hệ thống Hỗ trợ Quyết định (Decision Support System �
 
 ### 2.1. Tổng quan Pipeline
 
-```
-                                    LUỒNG XỬ LÝ DỮ LIỆU
- ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
- │  DỮ LIỆU THÔ │    │  DỮ LIỆU     │    │  DỮ LIỆU     │    │  DỮ LIỆU     │
- │  (Raw)        │───▶│  SẠCH        │───▶│  ĐẶC TRƯNG   │───▶│  QUYẾT ĐỊNH  │
- │               │    │  (Clean)      │    │  (Features)   │    │  (Decision)   │
- │  vnstock API  │    │  Chuẩn hóa,   │    │  20+ chỉ báo, │    │  Score 0-100, │
- │  OHLCV + Vol  │    │  Fill NA,     │    │  Labeling,    │    │  Signal,      │
- │  30 mã × 750  │    │  Flag outlier │    │  VNINDEX      │    │  Lý do        │
- └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+```mermaid
+flowchart LR
+    RAW["Dữ liệu thô<br/>vnstock API<br/>OHLCV + Vol<br/>30 mã x 750 phiên"] --> CLEAN["Dữ liệu sạch<br/>Chuẩn hóa types<br/>Fill NA<br/>Flag outlier >6.8%"]
+    CLEAN --> FEAT["Đặc trưng<br/>25+ cột chỉ báo<br/>19 features ML<br/>Label T+5 + VNINDEX"]
+    FEAT --> DEC["Quyết định<br/>Score 0-100<br/>Signal 5 mức<br/>Lý do"]
 ```
 
 ### 2.2. Chi tiết từng bước xử lý
 
 #### Bước 1: Thu thập dữ liệu thô (Phase 1 — `data_fetcher.py`)
 
-```
-Input:  Gọi vnstock API → Quét tự động danh sách VN30
-Output: 30 file CSV (OHLCV: time, open, high, low, close, volume)
-        + 1 file VNINDEX.csv
-
-Mỗi file CSV chứa ~750 dòng (3 năm giao dịch)
-Cột: time | open | high | low | close | volume
-VD:  2023-09-05 | 51.81 | 53.45 | 51.43 | 52.29 | 8,353,500
-```
+- **Input:** Gọi vnstock API → quét tự động danh sách VN30
+- **Output:** 30 file CSV OHLCV + 1 file VNINDEX.csv
+- Mỗi file ~750 dòng (3 năm). Cột: `time | open | high | low | close | volume`
+- VD: `2023-09-05 | 51.81 | 53.45 | 51.43 | 52.29 | 8,353,500`
 
 #### Bước 2: Làm sạch & Chuẩn hóa (Phase 2 — `data_cleaner.py`)
 
-```
-Vấn đề                          │  Cách xử lý
-─────────────────────────────────┼──────────────────────────────────
-Ngày nghỉ lễ → giá bị null      │  Forward-fill (dùng giá phiên trước)
-Đầu mút dữ liệu bị null        │  Backward-fill
-Kiểu dữ liệu lẫn lộn           │  close → float, volume → int, time → datetime
-Thứ tự ngẫu nhiên               │  Sắp xếp theo ngày tăng dần
-Biến động dị thường (>6.8%)      │  Đánh flag is_extreme = True (không xóa)
+| Vấn đề | Cách xử lý |
+|---|---|
+| Ngày nghỉ lễ → giá null | Forward-fill (giá phiên trước) |
+| Đầu mút dữ liệu null | Backward-fill |
+| Kiểu dữ liệu lẫn lộn | `close` → float, `volume` → int, `time` → datetime |
+| Thứ tự ngẫu nhiên | Sắp xếp theo ngày tăng dần |
+| Biến động > 6.8% | Flag `is_extreme = True` (không xóa) |
 
-Kết quả: DataFrame sạch, không null, types đúng, sẵn sàng tính toán
-```
+Kết quả: DataFrame sạch, không null, đúng types.
 
 #### Bước 3: Trích xuất đặc trưng kỹ thuật (Phase 3 — `indicators.py`)
 
-```
-Clean Data (6 cột) → Thư viện `ta` → DataFrame mở rộng (25+ cột)
+Clean 6 cột → thư viện `ta` → 25+ cột:
 
-Nhóm Xu hướng:   SMA(10,20,50,200), EMA(12,26), MACD(line, signal, histogram)
-Nhóm Động lượng: RSI(14), Stochastic(%K,%D), Williams %R
-Nhóm Biến động:  Bollinger Bands(upper,mid,lower), ATR(14)
-Nhóm Khối lượng: OBV, Volume Ratio (vol / avg_20)
-```
+| Nhóm | Chỉ báo |
+|---|---|
+| Xu hướng | SMA(10,20,50,200), EMA(12,26), MACD (line, signal, histogram) |
+| Động lượng | RSI(14), Stochastic (%K, %D), Williams %R |
+| Biến động | Bollinger Bands (upper, mid, lower, width), ATR(14), ATR% |
+| Khối lượng | OBV, Volume SMA20, Volume Ratio |
 
 #### Bước 4: Kỹ thuật đặc trưng & Gán nhãn (Phase 4 — `features.py`)
 
-```
-Biến đổi tuyệt đối → Tương đối:
-  Giá 72,200 VND                    →  price_vs_sma50 = +3.2%
-  Giá nằm ở 35% dải Bollinger      →  bb_position = 0.35
-  MACD histogram hôm nay vs 3 ngày  →  macd_hist_slope = +0.012
+25+ cột → 19 features (`FEATURE_COLUMNS`):
 
-Tích hợp thị trường:
-  Merge VNINDEX vào từng mã cổ phiếu → vnindex_vs_sma50, vnindex_return_5d
+| Nhóm | Features |
+|---|---|
+| Vị trí giá (3) | `price_vs_sma50`, `price_vs_sma200`, `sma50_vs_sma200` |
+| MACD (2) | `macd_hist`, `macd_hist_slope` |
+| Động lượng (4) | `rsi`, `stoch_k`, `stoch_d`, `williams_r` |
+| Biến động (3) | `bb_position`, `bb_width`, `atr_pct` |
+| Khối lượng (2) | `vol_ratio`, `obv_slope` |
+| Returns (3) | `return_1d`, `return_5d`, `return_20d` |
+| Thị trường (2) | `vnindex_vs_sma50`, `vnindex_return_5d` |
 
-Gán nhãn T+5 (cho Machine Learning):
-  Tăng ≥ +3% sau 5 phiên  →  label = 1  (MUA)
-  Giảm ≤ -3% sau 5 phiên  →  label = -1 (BÁN)
-  Còn lại                 →  label = 0  (GIỮ)
-```
+Ví dụ:
+
+- `72,200 VND` → `price_vs_sma50 = +3.2%`
+- Giá ở 35% dải Bollinger → `bb_position = 0.35`
+- MACD hist hôm nay vs 3 ngày trước → `macd_hist_slope = +0.012`
+
+Gán nhãn T+5:
+
+| Điều kiện | Label |
+|---|---|
+| Tăng ≥ +3% sau 5 phiên | `1` (MUA) |
+| Giảm ≤ -3% sau 5 phiên | `-1` (BÁN) |
+| Còn lại | `0` (GIỮ) |
 
 #### Bước 5–7: Đánh giá & Ra quyết định
 
-```
-Phase 5 (ML):        Train RF + XGBoost trên 80% data cũ → Predict → ML Score
-Phase 6 (Scoring):   Chấm điểm Rule-based 5 nhóm → Rule Score
-                     Total = Rule × 60% + ML × 40% → Signal (🟢🟡⚪🟠🔴)
-Phase 7 (Backtest):  Giả lập giao dịch 6 tháng → So sánh PnL vs Buy & Hold
+```mermaid
+flowchart LR
+    P5["Phase 5 ML<br/>Train 80% cũ<br/>RF + XGB → ML Score"] --> TOTAL["Total = Rule 60% + ML 40%<br/>→ Signal"]
+    P6["Phase 6 Rules<br/>5 nhóm TA<br/>→ Rule Score"] --> TOTAL
+    TOTAL --> P7["Phase 7 Backtest<br/>6 tháng vs Buy & Hold"]
 ```
 
 ---
 
 ## 3. Kiến trúc Hệ thống
 
-```
-[Tự động quét rổ VN30 từ vnstock]
-         │
-         ▼
-[Phase 1: Lấy Data OHLCV] ──> 30 mã × 750 phiên + VNINDEX
-         │
-         ▼
-[Phase 2: Data Cleaning] ───> Xử lý Missing, Outlier (>6.8%)
-         │
-         ▼
-[Phase 3: Indicators] ─────> SMA, EMA, MACD, RSI, BB, ATR, OBV (20+ chỉ báo)
-         │
-         ▼
-[Phase 4: Features] ───────> Crossover, Positions, Returns + Gán nhãn T+5
-         │
-         ├──► [Phase 5: ML] ───> Random Forest + XGBoost ──► ML Score (40%)
-         │                                                        │
-         └──► [Phase 6: Rules] ──> Chấm điểm 5 nhóm TA ─► Rule Score (60%)
-                                                                  │
-                                                        Total = 60% Rule + 40% ML
-                                                                  │
-                                                     ┌────────────┴────────────┐
-                                                     ▼                         ▼
-                                            [Bảng Khuyến Nghị]     [Phase 7: Backtest]
-                                            [🟢🟡⚪🟠🔴]          [So sánh vs Buy&Hold]
+> Bản Mermaid chuẩn 7 phase nằm ở [implementation_plan.md §1](implementation_plan.md#1-kiến-trúc-tổng-quan-toàn-hệ-thống). Sơ đồ dưới đây là bản rút gọn để đọc nhanh.
+
+```mermaid
+flowchart TD
+    SCAN["Quét rổ VN30 từ vnstock"] --> P1["Phase 1: Lấy Data OHLCV<br/>30 mã x 750 phiên + VNINDEX"]
+    P1 --> P2["Phase 2: Cleaning<br/>Missing + Outlier >6.8%"]
+    P2 --> P3["Phase 3: Indicators<br/>SMA EMA MACD RSI BB ATR OBV"]
+    P3 --> P4["Phase 4: Features<br/>19 features + Label T+5"]
+    P4 --> P5["Phase 5: ML<br/>RF + XGB → ML Score 40%"]
+    P4 --> P6["Phase 6: Rules<br/>5 nhóm TA → Rule Score 60%"]
+    P5 --> TOTAL["Total = 60% Rule + 40% ML"]
+    P6 --> TOTAL
+    TOTAL --> REC["Bảng khuyến nghị<br/>5 mức tín hiệu"]
+    TOTAL --> BT["Phase 7: Backtest<br/>vs Buy and Hold"]
 ```
 
 ### Thuật toán Machine Learning
@@ -163,6 +167,19 @@ Phase 7 (Backtest):  Giả lập giao dịch 6 tháng → So sánh PnL vs Buy & 
 | 🟠 **BÁN** | 25–39 | Phần lớn chỉ báo tiêu cực |
 | 🔴 **BÁN MẠNH** | < 25 | Cả ML và Rules đều cảnh báo rủi ro |
 
+```mermaid
+flowchart LR
+    SCORE["Total Score 0-100<br/>60% Rule + 40% ML"] --> G1{"≥ 75?"}
+    G1 -->|Yes| BUY2["MUA MẠNH"]
+    G1 -->|No| G2{"≥ 60?"}
+    G2 -->|Yes| BUY["MUA"]
+    G2 -->|No| G3{"≥ 40?"}
+    G3 -->|Yes| HOLD["GIỮ"]
+    G3 -->|No| G4{"≥ 25?"}
+    G4 -->|Yes| SELL["BÁN"]
+    G4 -->|No| SELL2["BÁN MẠNH"]
+```
+
 ---
 
 ## 4. Cấu trúc Dự án
@@ -178,11 +195,11 @@ DSS/
 ├── src/
 │   ├── data_fetcher.py          # Phase 1: Quét VN30, gọi vnstock API
 │   ├── data_cleaner.py          # Phase 2: Fill missing, flag outlier
-│   ├── indicators.py            # Phase 3: Tính 20+ chỉ báo kỹ thuật
-│   ├── features.py              # Phase 4: Tạo features + gán nhãn T+5
+│   ├── indicators.py            # Phase 3: Tính 20+ chỉ báo → 25+ cột
+│   ├── features.py              # Phase 4: Chắt lọc 19 features + gán nhãn T+5
 │   ├── ml_models.py             # Phase 5: Train RF + XGBoost
 │   ├── scoring.py               # Phase 6A: Chấm điểm Rule-based
-│   ├── decision.py              # Phase 6B: Tổng hợp + in bảng Terminal
+│   ├── decision.py              # Phase 6B: Tổng hợp + in bảng Terminal (7 cột)
 │   └── backtester.py            # Phase 7: Giả lập giao dịch
 │
 ├── data/                        # Dữ liệu CSV (gitignored)
@@ -247,6 +264,10 @@ python backtest_runner.py
 | `TEST_SIZE_RATIO` | `0.2` | 20% data cuối làm tập Test (Walk-forward) |
 | `WEIGHT_RULE_BASED` | `0.60` | Trọng số Rule-based trong tổng điểm |
 | `WEIGHT_ML_MODEL` | `0.40` | Trọng số ML trong tổng điểm |
+| `SCORE_STRONG_BUY` | `75` | ≥75 → 🟢 MUA MẠNH |
+| `SCORE_BUY` | `60` | 60–74 → 🟡 MUA |
+| `SCORE_HOLD` | `40` | 40–59 → ⚪ GIỮ |
+| `SCORE_SELL` | `25` | 25–39 → 🟠 BÁN, <25 → 🔴 BÁN MẠNH |
 | `BACKTEST_MONTHS` | `6` | Khoảng thời gian backtest |
 
 ---
@@ -289,6 +310,8 @@ Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho 
 | 4 | `label` | -1, 0, 1 | Nhãn BÁN/GIỮ/MUA cho huấn luyện ML |
 | 4 | `golden_cross` | True/False | SMA50 cắt lên SMA200 (đảo chiều tăng) |
 | 4 | `death_cross` | True/False | SMA50 cắt xuống SMA200 (đảo chiều giảm) |
+| 4 | `macd_cross_up` | True/False | MACD cắt lên Signal (momentum tăng) |
+| 4 | `macd_cross_down` | True/False | MACD cắt xuống Signal (momentum giảm) |
 | 5 | `ml_score` | 0–100 | P(MUA) × 100 từ Ensemble RF+XGBoost |
 | 6 | `rule_score` | 0–100 | Tổng điểm 5 nhóm phân tích kỹ thuật |
 | 6 | `total_score` | 0–100 | 60% Rule + 40% ML |
@@ -357,31 +380,37 @@ Dữ liệu chuỗi thời gian **không được shuffle**. Model chỉ học t
 
 **Kết quả:** Không thuật toán đơn lẻ nào đạt được sự cân bằng giữa **nhạy bén** (phát hiện cơ hội) và **an toàn** (tránh bẫy) như khi kết hợp cả 3 trong pipeline.
 
+> Ví dụ 4 tình huống bổ trợ (cả 3 đồng thuận / ML đúng-Rule sai / Rule trung tính-ML sớm / RF vs XGB bất đồng) xem tại [dss_algorithm_analysis.md §9](dss_algorithm_analysis.md#9-tính-kết-hợp-bổ-trợ--tại-sao-pipeline-mạnh-hơn-từng-phần-riêng-lẻ).
+
+> ⚠️ Hạn chế quan trọng (Overfitting, Data Snooping, Regime Change) xem tại [dss_algorithm_analysis.md §8](dss_algorithm_analysis.md#8-hạn-chế--cảnh-báo-quan-trọng). Tóm tắt ở [Disclaimer](#️-disclaimer).
+
 ---
 
 ## 9. Tài liệu Chi tiết
 
-| Tài liệu | Nội dung |
-|-----------|---------|
-| [implementation_plan.md](implementation_plan.md) | Kế hoạch triển khai 7 Phase + sơ đồ kiến trúc Mermaid |
-| [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Phân tích thuật toán: Decision Tree, Entropy/IG, Random Forest, XGBoost, Ensemble, Walk-Forward |
-| [dss_labels_reference.md](dss_labels_reference.md) | Tra cứu toàn bộ labels, ngưỡng điểm, ý nghĩa tài chính |
+| Tài liệu | Nội dung | Khi nào đọc |
+|-----------|---------|-------------|
+| [implementation_plan.md](implementation_plan.md) | Kế hoạch triển khai 7 Phase + sơ đồ kiến trúc Mermaid (single source) | Muốn xem tổng thể luồng |
+| [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Phân tích thuật toán: Decision Tree, Entropy/IG, Random Forest, XGBoost, Ensemble, Walk-Forward + §8 Hạn chế + §9 Bổ trợ | Viết báo cáo / bảo vệ đồ án |
+| [dss_labels_reference.md](dss_labels_reference.md) | Tra cứu toàn bộ labels, ngưỡng điểm, ý nghĩa tài chính | Tra cứu nhanh khi code |
+| [DSS_FULL_CODE_GUIDE.md](DSS_FULL_CODE_GUIDE.md) | Snapshot code minh họa 7 phase (có thể lỗi thời) — source thật nằm ở `src/*.py` | Chỉ tham khảo, không copy |
+
+> `AGENTS.md` (root + `src/`) là boilerplate onboarding của `vnstock`, không phải tài liệu DSS — bỏ qua khi đọc/báo cáo.
 
 ---
 
 ## 10. Output mẫu
 
-```
-╔══════════════════════════════════════════════════════════════╗
-║        DSS Khuyến Nghị Cổ Phiếu VN30 — 2026-09-08          ║
-╠══════╦════════╦═══════╦════════╦════════════════════════════╣
-║  Mã  ║ Signal ║ Điểm  ║  Giá   ║ Lý do chính              ║
-╠══════╬════════╬═══════╬════════╬════════════════════════════╣
-║ FPT  ║ 🟢 MUA ║ 72/100║ 72,200 ║ RSI phục hồi, MACD+      ║
-║ TCB  ║ ⚪ GIỮ ║ 51/100║ 48,600 ║ Sideway, chờ breakout     ║
-║ HPG  ║ 🟠 BÁN ║ 32/100║ 26,100 ║ Death cross, volume giảm  ║
-╚══════╩════════╩═══════╩════════╩════════════════════════════╝
-```
+Khớp với `src/decision.py: print_terminal_report` — 7 cột: MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO.
+Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn để đọc trên GitHub:
+
+| MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO |
+|---|---|---|---|---|---|---|
+| FPT | 72,200 đ | 72.0 | 71.0 | 73.5 | 🟡 MUA | RSI phục hồi; MACD tích cực |
+| TCB | 48,600 đ | 51.0 | 50.0 | 52.5 | ⚪ GIỮ | Sideway, chờ breakout |
+| HPG | 26,100 đ | 32.0 | 22.0 | 47.0 | 🟠 BÁN | Death cross; volume giảm |
+
+> Tổng điểm = 60% Rules + 40% ML Ensemble (RF + XGBoost).
 
 ---
 
@@ -390,3 +419,8 @@ Dữ liệu chuỗi thời gian **không được shuffle**. Model chỉ học t
 Đây là **Hệ thống Hỗ trợ Quyết định (DSS)**, không phải Bot Giao dịch tự động.
 Quyết định cuối cùng và quản trị vốn (cắt lỗ, đi lệnh) vẫn thuộc về người dùng.
 Kết quả trong quá khứ không đảm bảo lợi nhuận trong tương lai.
+
+**Hạn chế đã biết (chi tiết ở [dss_algorithm_analysis.md §8](dss_algorithm_analysis.md#8-hạn-chế--cảnh-báo-quan-trọng)):**
+- **Overfitting:** ML có thể nhớ thuộc quá khứ — đã giảm bằng `max_depth` giới hạn, `min_samples_leaf=20`, Walk-Forward, và Rule chiếm 60%.
+- **Data Snooping:** Tuyệt đối không dùng `future_return` làm feature, chỉ dùng để gán nhãn.
+- **Regime Change:** Thị trường đổi cấu trúc → train lại định kỳ với data mới nhất, Rule đóng vai trò ổn định.

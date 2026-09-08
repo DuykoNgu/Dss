@@ -1,6 +1,10 @@
 # 📈 HỆ THỐNG HỖ TRỢ QUYẾT ĐỊNH MUA BÁN CỔ PHIẾU (STOCK DSS — VN30)
-> **Tài liệu toàn diện & Mã nguồn chi tiết 7 Phase**  
+> **Tài liệu toàn diện & Mã nguồn chi tiết 7 Phase**
 > Tuân thủ chính xác theo bản thiết kế `implementation_plan.md` (đã phê duyệt)
+
+> ⚠️ **Lưu ý single-source:** File này là **snapshot minh họa**, có thể lỗi thời.
+> Source thật nằm ở `src/*.py`, `config.py`, `main.py`, `backtest_runner.py`.
+> Đọc tổng quan ở `README.md`, tra cứu ngưỡng ở `dss_labels_reference.md`, phân tích thuật toán ở `dss_algorithm_analysis.md`.
 
 **Scope:** Rổ VN30 (tự động) · Giao dịch ngắn hạn T+5 · Phân tích kỹ thuật + ML · Có Backtest
 
