@@ -48,12 +48,9 @@ cmd_setup() {
 
     source "$VENV_DIR/bin/activate"
 
-    echo -e "${YELLOW}📦 Cài đặt thư viện...${NC}"
+    echo -e "${YELLOW}📦 Cài thư viện...${NC}"
     pip install --upgrade pip
     pip install -r "$PROJECT_DIR/requirements.txt"
-
-    # Cài thêm thư viện cần thiết nếu chưa có trong requirements.txt
-    pip install ta scikit-learn xgboost joblib tabulate colorama
 
     echo -e "${YELLOW}📁 Tạo thư mục...${NC}"
     mkdir -p "$PROJECT_DIR/data/stocks"
@@ -70,8 +67,8 @@ cmd_fetch() {
     print_header "Tải Dữ Liệu VN30"
     activate_venv
 
-    echo -e "${YELLOW}📡 Đang quét rổ VN30 và tải OHLCV...${NC}"
-    python3 "$PROJECT_DIR/src/data_fetcher.py"
+    echo -e "${YELLOW}📡 Đang đồng bộ rổ VN30 (incremental: chỉ lấy nến mới)...${NC}"
+    python3 "$PROJECT_DIR/main.py" --fetch-only "$@"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Tải dữ liệu hoàn tất!${NC}"
@@ -79,15 +76,10 @@ cmd_fetch() {
 }
 
 cmd_dss() {
-    print_header "Chạy Khuyến Nghị Hôm Nay"
+    print_header "Chạy Pipeline DSS"
     activate_venv
 
-    if [ ! -f "$PROJECT_DIR/main.py" ]; then
-        echo -e "${RED}❌ Chưa có file main.py. Hãy tạo theo DSS_FULL_CODE_GUIDE.md${NC}"
-        exit 1
-    fi
-
-    python3 "$PROJECT_DIR/main.py"
+    python3 "$PROJECT_DIR/main.py" "$@"
 }
 
 cmd_backtest() {
@@ -103,22 +95,56 @@ cmd_backtest() {
 }
 
 cmd_test_phase() {
-    PHASE=$1
+    print_header "Smoke Test Pipeline (offline, 2 mã)"
     activate_venv
+    python3 "$PROJECT_DIR/main.py" --no-fetch --limit 2
+}
 
-    case $PHASE in
-        1) print_header "Test Phase 1: Data Fetcher"
-           python3 "$PROJECT_DIR/src/data_fetcher.py" ;;
-        2) print_header "Test Phase 2: Data Cleaner"
-           python3 "$PROJECT_DIR/src/data_cleaner.py" ;;
-        3) print_header "Test Phase 3: Indicators"
-           python3 "$PROJECT_DIR/src/indicators.py" ;;
-        4) print_header "Test Phase 4: Features"
-           python3 "$PROJECT_DIR/src/features.py" ;;
-        5) print_header "Test Phase 5: ML Models"
-           python3 "$PROJECT_DIR/src/ml_models.py" ;;
-        *) echo -e "${RED}❌ Phase không hợp lệ. Chọn 1-5.${NC}" ;;
-    esac
+cmd_clear_data() {
+    print_header "Xóa Dữ Liệu Cũ"
+
+    # Hỗ trợ --yes / -y để bỏ qua xác nhận (dùng trong script tự động)
+    SKIP_CONFIRM=false
+    for arg in "$@"; do
+        case "$arg" in
+            --yes|-y) SKIP_CONFIRM=true ;;
+        esac
+    done
+
+    STOCK_COUNT=$(ls "$PROJECT_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
+    INDEX_COUNT=$(ls "$PROJECT_DIR/data/index/"*.csv 2>/dev/null | wc -l | tr -d ' ')
+
+    echo -e "   Stocks CSV: ${CYAN}${STOCK_COUNT} file${NC} trong data/stocks/"
+    echo -e "   Index CSV:  ${CYAN}${INDEX_COUNT} file${NC} trong data/index/"
+    if [ -f "$PROJECT_DIR/data/symbols.json" ]; then
+        echo -e "   symbols.json: ${CYAN}có${NC} (sẽ xóa để fetch quét lại rổ VN30 mới)"
+    fi
+    echo -e "   Models trong ${CYAN}models/${NC}: ${YELLOW}giữ nguyên${NC} (muốn xóa cả models thì dùng './run.sh clean')"
+    echo ""
+
+    if [ "$SKIP_CONFIRM" != true ]; then
+        echo -ne "${YELLOW}❓ Xóa toàn bộ data cũ? [y/N]: ${NC}"
+        read -r CONFIRM
+        case "$CONFIRM" in
+            [yY][eE][sS]|[yY]) ;;
+            *) echo -e "${CYAN}Đã hủy, không xóa gì cả.${NC}"; return 0 ;;
+        esac
+    fi
+
+    echo -e "${YELLOW}🗑️  Xóa data/stocks/*.csv...${NC}"
+    rm -f "$PROJECT_DIR/data/stocks/"*.csv
+
+    echo -e "${YELLOW}🗑️  Xóa data/index/*.csv...${NC}"
+    rm -f "$PROJECT_DIR/data/index/"*.csv
+
+    echo -e "${YELLOW}🗑️  Xóa data/symbols.json...${NC}"
+    rm -f "$PROJECT_DIR/data/symbols.json"
+
+    mkdir -p "$PROJECT_DIR/data/stocks" "$PROJECT_DIR/data/index"
+
+    echo ""
+    echo -e "${GREEN}${BOLD}✅ Đã xóa data cũ!${NC}"
+    echo -e "   Tiếp theo chạy: ${CYAN}./run.sh fetch${NC} để tải lại dữ liệu mới"
 }
 
 cmd_clean() {
@@ -127,6 +153,7 @@ cmd_clean() {
     echo -e "${YELLOW}🗑️  Xóa data cache...${NC}"
     rm -rf "$PROJECT_DIR/data/stocks/"*.csv
     rm -rf "$PROJECT_DIR/data/index/"*.csv
+    rm -f "$PROJECT_DIR/data/symbols.json"
 
     echo -e "${YELLOW}🗑️  Xóa models đã train...${NC}"
     rm -rf "$PROJECT_DIR/models/"*.pkl
@@ -166,7 +193,7 @@ cmd_status() {
 
     echo ""
     echo -e "${BOLD}📝 Source files:${NC}"
-    for f in data_fetcher data_cleaner indicators features ml_models scoring decision backtester; do
+    for f in data/data_fetcher data/data_cleaner features/indicators features/features models/ml_models scoring/scoring scoring/decision backtest/backtester; do
         if [ -f "$PROJECT_DIR/src/${f}.py" ]; then
             echo -e "   src/${f}.py   ${GREEN}✅${NC}"
         else
@@ -183,6 +210,69 @@ cmd_status() {
     done
 }
 
+cmd_push() {
+    print_header "Push Code Lên GitHub"
+
+    cd "$PROJECT_DIR" || exit 1
+
+    # ── 1. Kiểm tra git repo ──
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        echo -e "${RED}❌ Chưa phải git repo. Chạy: git init${NC}"
+        exit 1
+    fi
+
+    BRANCH=$(git branch --show-current)
+    [ -z "$BRANCH" ] && BRANCH="main"
+
+    # ── 2. Gom message từ tất cả tham số ──
+    # Dùng: ./run.sh push "fix scoring"  hoặc  ./run.sh push (tự sinh)
+    MSG="$*"
+    if [ -z "$MSG" ]; then
+        MSG="update: $(date '+%Y-%m-%d %H:%M')"
+    fi
+
+    echo -e "   Branch:  ${CYAN}${BRANCH}${NC}"
+    echo -e "   Message: ${CYAN}${MSG}${NC}"
+    echo ""
+
+    # ── 3. Add tất cả (tôn trọng .gitignore → data/, models/, .venv tự bỏ qua) ──
+    echo -e "${YELLOW}📦 git add...${NC}"
+    git add -A
+
+    # ── 4. Nếu không có gì để commit → kiểm tra có commit chưa push không ──
+    if git diff --cached --quiet; then
+        echo -e "${YELLOW}ℹ️  Không có thay đổi mới để commit.${NC}"
+        AHEAD=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo 0)
+        if [ "$AHEAD" != "0" ] && [ -n "$AHEAD" ]; then
+            echo -e "${YELLOW}📤 Có ${AHEAD} commit chưa push → đang push...${NC}"
+        else
+            echo -e "${GREEN}✅ Mọi thứ đã đồng bộ, không cần push.${NC}"
+            return 0
+        fi
+    else
+        echo -e "${YELLOW}📝 git commit...${NC}"
+        git commit -m "$MSG"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}🔄 Pull --rebase để tránh conflict...${NC}"
+    if ! git pull --rebase origin "$BRANCH" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Không pull được (có thể remote chưa có branch này hoặc mất mạng). Bỏ qua, tiếp tục push...${NC}"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}📤 git push...${NC}"
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} &>/dev/null; then
+        git push
+    else
+        git push -u origin "$BRANCH"
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}✅ Push hoàn tất!${NC}"
+    echo -e "   Xem tại: ${CYAN}$(git remote get-url origin 2>/dev/null)${NC}"
+}
+
 cmd_help() {
     print_header "Hướng Dẫn Sử Dụng"
 
@@ -190,12 +280,14 @@ cmd_help() {
     echo ""
     echo -e "${BOLD}Các lệnh:${NC}"
     echo -e "  ${CYAN}setup${NC}        Tạo venv, cài thư viện, tạo thư mục"
-    echo -e "  ${CYAN}fetch${NC}        Tải dữ liệu VN30 mới nhất từ vnstock"
+    echo -e "  ${CYAN}fetch${NC}        Đồng bộ VN30: mã thiếu tải full, mã cũ chỉ lấy nến mới (incremental)"
     echo -e "  ${CYAN}dss${NC}          Chạy khuyến nghị hôm nay (main.py)"
     echo -e "  ${CYAN}backtest${NC}     Chạy kiểm chứng lịch sử (backtest_runner.py)"
-    echo -e "  ${CYAN}test <1-5>${NC}   Test từng Phase riêng lẻ"
+    echo -e "  ${CYAN}test${NC}          Smoke test pipeline (offline, 2 mã)"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
+    echo -e "  ${CYAN}clear-data${NC}   Chỉ xóa data cũ (stocks/index/symbols.json), giữ models"
     echo -e "  ${CYAN}clean${NC}        Xóa cache data, models, __pycache__"
+    echo -e "  ${CYAN}push${NC}         Push code lên GitHub bằng 1 lệnh"
     echo -e "  ${CYAN}help${NC}         Hiển thị hướng dẫn này"
     echo ""
     echo -e "${BOLD}Quy trình đề xuất:${NC}"
@@ -203,18 +295,24 @@ cmd_help() {
     echo -e "  2. ${CYAN}./run.sh fetch${NC}     # Tải data VN30"
     echo -e "  3. ${CYAN}./run.sh dss${NC}       # Xem khuyến nghị"
     echo -e "  4. ${CYAN}./run.sh backtest${NC}  # Kiểm chứng hiệu suất"
+    echo ""
+    echo -e "${BOLD}Push code:${NC}"
+    echo -e "  ${CYAN}./run.sh push \"mô tả thay đổi\"${NC}"
+    echo -e "  ${CYAN}./run.sh push${NC}  # tự tạo message theo ngày giờ"
 }
 
 # ═══════════════ MAIN ═══════════════
 
 case "${1:-help}" in
     setup)    cmd_setup ;;
-    fetch)    cmd_fetch ;;
-    dss)      cmd_dss ;;
+    fetch)    shift; cmd_fetch "$@" ;;
+    dss)      shift; cmd_dss "$@" ;;
     backtest) cmd_backtest ;;
-    test)     cmd_test_phase "$2" ;;
+    test)     shift; cmd_test_phase "$@" ;;
+    clear-data) cmd_clear_data "$2" ;;
     clean)    cmd_clean ;;
     status)   cmd_status ;;
+    push)     shift; cmd_push "$@" ;;
     help)     cmd_help ;;
     *)
         echo -e "${RED}❌ Lệnh không hợp lệ: $1${NC}"

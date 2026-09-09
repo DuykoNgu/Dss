@@ -13,6 +13,29 @@ START_DATE = (datetime.now() - timedelta(days=LOOKBACK_YEARS * 365)).strftime("%
 ML_FORWARD_DAYS = 5
 ML_PROFIT_THRESHOLD = 0.03
 TEST_SIZE_RATIO = 0.2
+RANDOM_STATE = 42
+MIN_TRAIN_ROWS = 100
+
+# Random Forest ("phòng thủ"): 200 cây độc lập, lá >=20 mẫu chống overfit,
+# balanced vì nhãn GIỮ thường chiếm đa số
+RF_PARAMS = {
+    "n_estimators": 200,
+    "max_depth": 10,
+    "min_samples_leaf": 20,
+    "class_weight": "balanced",
+    "random_state": RANDOM_STATE,
+}
+
+# XGBoost ("tấn công"): cây nông + học chậm để khỏi overfit dữ liệu nhiễu
+XGB_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "eval_metric": "mlogloss",
+    "random_state": RANDOM_STATE,
+}
 
 # ── 3. Trọng số quyết định ──
 WEIGHT_RULE_BASED = 0.60
@@ -32,4 +55,5 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 # ── 7. vnstock API ──
-DATA_COUNT = 1000
+# ~750 phiên = 3 năm x ~252 phiên/năm (khớp LOOKBACK_YEARS và README)
+DATA_COUNT = 750

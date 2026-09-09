@@ -41,7 +41,9 @@ XGBoost yêu cầu nhãn bắt đầu từ 0:
 | GIỮ | `0` | `1` | `proba[1]` = Xác suất giá đi ngang |
 | MUA | `1` | `2` | `proba[2]` = Xác suất giá tăng > 3% |
 
-**ML Score = `proba[2] × 100`** — Chỉ lấy xác suất MUA vì đó là thứ nhà đầu tư quan tâm nhất: *"Khả năng cổ phiếu này tăng giá là bao nhiêu?"*
+**ML Score = `proba[2]` (đã hiệu chỉnh prior) × 100** — Chỉ lấy xác suất MUA vì đó là thứ nhà đầu tư quan tâm nhất: *"Khả năng cổ phiếu này tăng giá là bao nhiêu?"*
+
+> Vì sao phải hiệu chỉnh prior: cả RF và XGBoost train với trọng số class **cân bằng** (để không "lười" đoán GIỮ — nhãn chiếm đa số). Điều này làm xác suất output bị kéo về prior đều 1/3, nên hệ thống nhân ngược lại theo tỷ lệ nhãn thật của tập train trước khi lấy `proba[2]`. Kết quả ML Score là ước lượng trung thực của P(MUA), không bị thổi phồng bởi trọng số cân bằng.
 
 ---
 
@@ -133,9 +135,13 @@ Hệ thống bắt đầu chấm điểm từ **50 điểm** (trung tính). Từ
 
 | Cột | Giá trị | Ý nghĩa |
 |-----|---------|---------|
-| `is_extreme = True` | Biến động > ±6.8% | Phiên giao dịch chạm hoặc gần trần/sàn HOSE. Đây là biến động **bất thường** — có thể do tin tức đột biến, thao túng giá, hoặc sự kiện vĩ mô. Hệ thống **đánh flag để cảnh báo nhưng không loại bỏ** vì đây vẫn là dữ liệu thật. |
+| `is_extreme = True` | Biến động > ±6.8% (nến ngày) | Phiên giao dịch chạm hoặc gần trần/sàn HOSE. Đây là biến động **bất thường** — có thể do tin tức đột biến, thao túng giá, hoặc sự kiện vĩ mô. Hệ thống **đánh flag để cảnh báo nhưng không loại bỏ** vì đây vẫn là dữ liệu thật. Ngưỡng này chỉ đúng với nến ngày. |
 | `is_extreme = False` | Biến động < ±6.8% | Phiên giao dịch bình thường, biến động trong biên độ cho phép. |
-| `daily_return` | Số thực (%) | % thay đổi giá đóng cửa so với phiên trước. Ví dụ: `+2.5` nghĩa là hôm nay giá tăng 2.5% so với hôm qua. |
+| `period_return` | Số thực | % thay đổi giá đóng cửa so với kỳ trước (timeframe-neutral, hiện tại = nến ngày). Ví dụ: `+0.025` nghĩa là kỳ này giá tăng 2.5% so với kỳ trước. |
+| `volume_missing = True` | Khối lượng NaN gốc | Phiên **không lấy được dữ liệu volume** (khác với volume = 0 là không có giao dịch). Volume được điền 0 để tính toán nhưng cờ này giữ lại thông tin thiếu cho ML. |
+| `is_ohlc_invalid = True` | Nến sai logic | Nến vi phạm `high >= max(open, close)` hoặc `low <= min(open, close)`. Flag để phase sau biết, không tự xóa. |
+
+> Quy tắc fill: Phase 2 **chỉ forward-fill** (lấy quá khứ đắp vào lỗ hổng). Cấm backward-fill vì đó là lấy dữ liệu tương lai điền về quá khứ (leakage cho ML). NaN đầu file không có quá khứ để fill sẽ bị loại bỏ.
 
 ---
 
@@ -149,7 +155,13 @@ Hệ thống bắt đầu chấm điểm từ **50 điểm** (trung tính). Từ
 | `proba[1]` | GIỮ | Xác suất giá dao động trong ±3% | 0.22 (22%) |
 | `proba[2]` | MUA | Xác suất giá sẽ tăng > 3% trong 5 phiên | 0.68 (68%) |
 
-**ML Score = `proba[2] × 100` = 68 điểm**
+**ML Score = `proba[2]` (hiệu chỉnh prior) × 100**
+
+Ví dụ: model trả `[0.10, 0.22, 0.68]` dưới prior cân bằng; nếu nhãn thật của tập train là BÁN 21.5% / GIỮ 61.3% / MUA 17.1%, xác suất được nhân tỷ lệ `prior_thật / (1/3)` rồi chuẩn hóa lại trước khi lấy MUA.
+
+Hai trường hợp đặc biệt trả về **50 điểm** (trung tính, để Rule-based 60% quyết định):
+- Mã **không đủ dữ liệu train** (dưới `MIN_TRAIN_ROWS=100` dòng — VD: TCX chỉ ~14 dòng trainable) → không có model.
+- Dòng dự đoán có **feature NaN** → không nên bịa số.
 
 Tại sao chỉ lấy `P(MUA)`? Vì đối với nhà đầu tư, câu hỏi quan trọng nhất là *"Khả năng cổ phiếu này TĂNG GIÁ là bao nhiêu?"*. ML Score cao (> 60) nghĩa là mô hình tự tin rằng cổ phiếu sẽ tăng. ML Score thấp (< 30) nghĩa là mô hình nghiêng về phía GIỮ hoặc BÁN.
 

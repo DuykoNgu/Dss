@@ -39,7 +39,7 @@ Gán nhãn T+5 (MUA / GIỮ / BÁN)
     │                                │
     │                    Trung bình xác suất (Ensemble)
     │                                │
-    │                         ML Score = P(MUA) × 100
+    │                         ML Score = P(MUA) hiệu chỉnh prior × 100
     │                                │
     └──► Rule-Based ──────────► Rule Score (0-100)
                                      │
@@ -354,7 +354,16 @@ Khi kết hợp: **Sai lầm của model này được model kia bù đắp.**
 
 **Tại sao trung bình xác suất thay vì bỏ phiếu đa số (Majority Voting)?**
 - Bỏ phiếu đa số chỉ cho biết "MUA hay BÁN" — mất thông tin về **mức độ tự tin**.
-- Trung bình xác suất giữ lại **toàn bộ thông tin**: RF tự tin 65% MUA, XGBoost tự tin 72% MUA → Ensemble tự tin 68.5% MUA. Con số 68.5 này sau đó được dùng trực tiếp làm ML Score.
+- Trung bình xác suất giữ lại **toàn bộ thông tin**: RF tự tin 65% MUA, XGBoost tự tin 72% MUA → Ensemble tự tin 68.5% MUA.
+
+**Bước hiệu chỉnh prior (quan trọng, đừng bỏ qua):**
+Cả 2 model train với trọng số class **cân bằng** (chống "lười" đoán GIỮ), nên xác suất output bị kéo về prior đều 1/3. Trước khi lấy P(MUA), hệ thống nhân ngược theo tỷ lệ nhãn thật của tập train:
+
+```
+P_hiệu_chỉnh(c) = P_trung_bình(c) × (prior_thật(c) / ⅓)   →   chuẩn hóa lại tổng = 1
+```
+
+Nếu bỏ bước này, ML Score sẽ bị thổi phồng gấp ~1.5–2 lần so với khả năng tăng giá thật. Con số sau hiệu chỉnh mới được dùng làm ML Score.
 
 ### 4.3. Khi nào Ensemble đặc biệt hữu ích?
 
@@ -555,7 +564,7 @@ Hãy hình dung hệ thống như một đội **3 chuyên gia** cùng đánh gi
           ▼                ▼                   │
    ┌──────────────────────────┐                │
    │   ENSEMBLE (50/50)       │                │
-   │   ML Score = P(MUA)×100  │                │
+   │   ML Score = P(MUA) hiệu chỉnh prior × 100  │                │
    └────────────┬─────────────┘                │
                 │                              │
                 ▼ (40%)                        ▼ (60%)

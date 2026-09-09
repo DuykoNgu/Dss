@@ -52,7 +52,7 @@ Xây dựng **Hệ thống Hỗ trợ Quyết định (Decision Support System �
 
 > Đọc 30 giây để biết hệ thống trả về gì, rồi mới quyết định đọc tiếp hay chạy thử ở §3.
 
-Khớp với `src/decision.py: print_terminal_report` — 7 cột: MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO.
+Khớp với `src/scoring/decision.py: print_terminal_report` — 7 cột: MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO.
 Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn để đọc trên GitHub:
 
 | MÃ | GIÁ | TỔNG | RULES (60%) | ML (40%) | KHUYẾN NGHỊ | LÝ DO |
@@ -75,7 +75,7 @@ Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn đ�
 # Lần đầu: setup môi trường + cài thư viện
 ./run.sh setup
 
-# Tải data VN30
+# Tải data VN30 (incremental: mã thiếu tải full, mã cũ chỉ lấy nến mới rồi append)
 ./run.sh fetch
 
 # Chạy khuyến nghị hôm nay
@@ -87,6 +87,15 @@ Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn đ�
 # Kiểm tra trạng thái dự án
 ./run.sh status
 
+# Xóa data cũ, giữ models (hỏi xác nhận trước khi xóa)
+./run.sh clear-data
+# Bỏ qua xác nhận khi chạy tự động
+./run.sh clear-data --yes
+
+# Push code lên GitHub bằng 1 lệnh
+./run.sh push "mô tả thay đổi"
+./run.sh push  # tự tạo message theo ngày giờ
+
 # Xem tất cả lệnh
 ./run.sh help
 ```
@@ -97,8 +106,8 @@ Terminal dùng `tabulate fancy_grid`, dưới đây là bản markdown gọn đ�
 # 1. Cài thư viện
 pip install -r requirements.txt
 
-# 2. Tải dữ liệu VN30
-python src/data_fetcher.py
+# 2. Tải dữ liệu VN30 (incremental)
+python main.py --fetch-only
 
 # 3. Chạy khuyến nghị
 python main.py
@@ -133,7 +142,7 @@ flowchart TD
 |-----------|---------|--------|
 | **Random Forest** | "Phòng thủ" — Ổn định, chống nhiễu | 200 cây quyết định song song (Bagging), bỏ phiếu đa số |
 | **XGBoost** | "Tấn công" — Nhạy bén, bắt pattern tinh vi | 300 cây tuần tự (Boosting), mỗi cây sửa lỗi cây trước |
-| **Ensemble** | Trung bình xác suất 2 model | `ML Score = P(MUA) × 100` |
+| **Ensemble** | Trung bình xác suất 2 model | `ML Score = P(MUA) hiệu chỉnh prior × 100` |
 | **Rule-Based** | "Trọng tài" — Kiểm tra logic TA cơ bản | Chấm điểm 5 nhóm: Trend 30%, Momentum 25%, Volume 20%, Volatility 15%, Market 10% |
 
 ### Tín hiệu đầu ra
@@ -258,14 +267,19 @@ DSS/
 ├── backtest_runner.py           # Kiểm chứng lợi nhuận lịch sử
 │
 ├── src/
-│   ├── data_fetcher.py          # Phase 1: Quét VN30, gọi vnstock API
-│   ├── data_cleaner.py          # Phase 2: Fill missing, flag outlier
-│   ├── indicators.py            # Phase 3: Tính 20+ chỉ báo → 25+ cột
-│   ├── features.py              # Phase 4: Chắt lọc 19 features + gán nhãn T+5
-│   ├── ml_models.py             # Phase 5: Train RF + XGBoost
-│   ├── scoring.py               # Phase 6A: Chấm điểm Rule-based
-│   ├── decision.py              # Phase 6B: Tổng hợp + in bảng Terminal (7 cột)
-│   └── backtester.py            # Phase 7: Giả lập giao dịch
+│   ├── data/                    # Phase 1-2: lấy + làm sạch dữ liệu
+│   │   ├── data_fetcher.py      # Quét VN30, gọi vnstock API (incremental)
+│   │   └── data_cleaner.py      # Fill missing, flag outlier
+│   ├── features/                # Phase 3-4: chỉ báo + features
+│   │   ├── indicators.py        # Tính 20+ chỉ báo → 25+ cột
+│   │   └── features.py          # Chắt lọc 19 features + gán nhãn T+5
+│   ├── models/                  # Phase 5: học máy
+│   │   └── ml_models.py         # Train RF + XGBoost
+│   ├── scoring/                 # Phase 6: chấm điểm + quyết định
+│   │   ├── scoring.py           # Chấm điểm Rule-based 5 nhóm
+│   │   └── decision.py          # Tổng hợp 60/40 + bảng Terminal
+│   └── backtest/                # Phase 7: kiểm chứng
+│       └── backtester.py        # Giả lập giao dịch (chưa có)
 │
 ├── data/                        # Dữ liệu CSV (gitignored)
 │   ├── symbols.json
@@ -337,7 +351,7 @@ Hệ thống nhìn trước **5 phiên giao dịch (T+5)** để gán nhãn cho 
 | 4 | `death_cross` | True/False | SMA50 cắt xuống SMA200 (đảo chiều giảm) |
 | 4 | `macd_cross_up` | True/False | MACD cắt lên Signal (momentum tăng) |
 | 4 | `macd_cross_down` | True/False | MACD cắt xuống Signal (momentum giảm) |
-| 5 | `ml_score` | 0–100 | P(MUA) × 100 từ Ensemble RF+XGBoost |
+| 5 | `ml_score` | 0–100 | P(MUA) hiệu chỉnh prior × 100 từ Ensemble RF+XGBoost (thiếu model/NaN → 50) |
 | 6 | `rule_score` | 0–100 | Tổng điểm 5 nhóm phân tích kỹ thuật |
 | 6 | `total_score` | 0–100 | 60% Rule + 40% ML |
 | 6 | Signal | 🟢🟡⚪🟠🔴 | MUA MẠNH (≥75) → BÁN MẠNH (<25) |
@@ -376,7 +390,7 @@ Một cây đơn lẻ dễ bị **Overfitting** (nhớ thuộc dữ liệu cũ) 
 
 ```
 Random Forest:  P(MUA) = 72%  ─┐
-                                ├─► Trung bình: (72+78)/2 = 75% ──► ML Score = 75
+                                ├─► Trung bình: (72+78)/2 = 75% ─► hiệu chỉnh prior ─► ML Score
 XGBoost:        P(MUA) = 78%  ─┘
 ```
 
