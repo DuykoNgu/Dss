@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=0, help="Giới hạn số mã (test nhanh)")
     parser.add_argument("--no-fetch", action="store_true", help="Không gọi API, chỉ dùng CSV cache")
     parser.add_argument("--fetch-only", action="store_true", help="Chỉ đồng bộ dữ liệu rồi dừng")
+    parser.add_argument("--retrain", action="store_true", help="Train lại model thay vì ưu tiên model cache")
     return parser.parse_args()
 
 
@@ -79,8 +80,8 @@ def load_market_index() -> pd.DataFrame:
     return clean_index_data(pd.read_csv(INDEX_PATH))
 
 
-def build_recommendations(featured: dict[str, pd.DataFrame]) -> list[dict]:
-    return generate_decisions(featured)
+def build_recommendations(featured: dict[str, pd.DataFrame], force_retrain: bool) -> list[dict]:
+    return generate_decisions(featured, force_retrain=force_retrain)
 
 
 def print_report(rows: list[dict]) -> None:
@@ -126,7 +127,7 @@ def main() -> int:
 
     # [5/5] Chấm điểm Rule + ML, tổng hợp 60/40 thành tín hiệu
     print("[5/5] Train ML + chấm điểm + khuyến nghị...")
-    rows = build_recommendations(featured)
+    rows = build_recommendations(featured, force_retrain=args.retrain)
 
     print_report(rows)
     return 0

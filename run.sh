@@ -100,6 +100,18 @@ cmd_test_phase() {
     python3 "$PROJECT_DIR/main.py" --no-fetch --limit 2
 }
 
+cmd_evaluate() {
+    print_header "Đánh Giá ML Walk-Forward"
+    activate_venv
+    python3 -m src.models.evaluate "$@"
+}
+
+cmd_tune() {
+    print_header "Tune RF + XGBoost"
+    activate_venv
+    python3 -m src.models.tune "$@"
+}
+
 cmd_clear_data() {
     print_header "Xóa Dữ Liệu Cũ"
 
@@ -282,8 +294,11 @@ cmd_help() {
     echo -e "  ${CYAN}setup${NC}        Tạo venv, cài thư viện, tạo thư mục"
     echo -e "  ${CYAN}fetch${NC}        Đồng bộ VN30: mã thiếu tải full, mã cũ chỉ lấy nến mới (incremental)"
     echo -e "  ${CYAN}dss${NC}          Chạy khuyến nghị hôm nay (main.py)"
+    echo -e "  ${CYAN}dss --retrain${NC} Train lại toàn bộ model thay vì dùng cache"
     echo -e "  ${CYAN}backtest${NC}     Chạy kiểm chứng lịch sử (backtest_runner.py)"
     echo -e "  ${CYAN}test${NC}          Smoke test pipeline (offline, 2 mã)"
+    echo -e "  ${CYAN}evaluate${NC}     Label distribution + metrics + confusion matrix"
+    echo -e "  ${CYAN}tune${NC}         So sánh cấu hình RF/XGBoost bằng walk-forward"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
     echo -e "  ${CYAN}clear-data${NC}   Chỉ xóa data cũ (stocks/index/symbols.json), giữ models"
     echo -e "  ${CYAN}clean${NC}        Xóa cache data, models, __pycache__"
@@ -309,6 +324,8 @@ case "${1:-help}" in
     dss)      shift; cmd_dss "$@" ;;
     backtest) cmd_backtest ;;
     test)     shift; cmd_test_phase "$@" ;;
+    evaluate) shift; cmd_evaluate "$@" ;;
+    tune)     shift; cmd_tune "$@" ;;
     clear-data) cmd_clear_data "$2" ;;
     clean)    cmd_clean ;;
     status)   cmd_status ;;

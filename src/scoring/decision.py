@@ -38,15 +38,21 @@ def generate_decision(symbol: str, latest: pd.Series, parts: dict) -> dict:
     }
 
 
-def generate_decisions(featured: dict[str, pd.DataFrame]) -> list[dict]:
-    """Train/load ML từng mã, chấm Rule, ghép 60/40, xếp điểm giảm dần."""
+def generate_decisions(
+    featured: dict[str, pd.DataFrame],
+    force_retrain: bool = False,
+) -> list[dict]:
+    """Load model cache trước, train khi thiếu hoặc có yêu cầu retrain."""
     rows = []
     for symbol, df in featured.items():
         if df is None or df.empty:
             continue
-        rf, xgb = train_ml_models(df, symbol)
-        if rf is None:
+        if force_retrain:
+            rf, xgb = train_ml_models(df, symbol)
+        else:
             rf, xgb = load_ml_models(symbol)
+            if rf is None or xgb is None:
+                rf, xgb = train_ml_models(df, symbol)
         ml_score = predict_ml_score(df.iloc[[-1]], rf, xgb)
         rule_score, reasons = calculate_rule_based_score(df)
         rows.append(generate_decision(

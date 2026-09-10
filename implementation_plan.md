@@ -152,7 +152,7 @@ flowchart TD
 | **Phase 2** | `src/data/data_cleaner.py` | Lọc nhiễu, điền missing values, flag outlier trần/sàn (>6.8%). |
 | **Phase 3** | `src/features/indicators.py` | Chạy thư viện `ta` tính 20+ chỉ báo → ~25 cột. |
 | **Phase 4** | `src/features/features.py` | Chắt lọc 19 features tương đối (`FEATURE_COLUMNS`), merge VNINDEX, gán nhãn T+5 (±3%). |
-| **Phase 5** | `src/models/ml_models.py` | Train Random Forest & XGBoost (Walk-forward 80/20), lưu 60 model file (30 mã x 2). |
+| **Phase 5** | `src/models/ml_models.py`, `src/models/validation.py`, `src/models/evaluate.py` | Train RF & XGBoost, expanding walk-forward + purge gap, Macro F1/BUY-SELL metrics/confusion matrix, lưu model file. |
 | **Phase 6** | `src/scoring/scoring.py`, `src/scoring/decision.py` | Cân quyền trọng số 60/40, in bảng 7 cột màu Terminal. |
 | **Phase 7** | `src/backtest/backtester.py`, `backtest_runner.py` | Giả lập giao dịch 6 tháng, so sánh PnL với Buy & Hold. |
 | **Main** | `config.py`, `main.py`, `run.sh` | Tùy chỉnh tham số, điểm neo chạy toàn bộ dự án (`./run.sh dss/backtest/fetch/status`). |
