@@ -11,9 +11,8 @@ He thong tao diem `0-100` cho tung ma, sau do phan loai thanh `MUA MANH`,
 dat lenh va khong phai cam ket loi nhuan.
 
 > **Trang thai hien tai:** pipeline lay du lieu, lam sach, tao feature, train/
-> nap model, danh gia walk-forward va tao khuyen nghi dang co trong source.
-> Backtest giao dich chua duoc trien khai: repository hien chua co
-> `backtest_runner.py` va `src/backtest/backtester.py`.
+> nap model, danh gia walk-forward, tao khuyen nghi va backtest giao dich
+> (co phi/thue/slippage) deu da co trong source.
 
 ## Muc luc
 
@@ -54,6 +53,7 @@ Voi moi ma co phieu, DSS:
 | Feature production | 19 feature baseline |
 | Mo hinh | Random Forest + XGBoost |
 | Validation danh gia | Expanding walk-forward, khong shuffle, purge gap 5 phien |
+| Backtest | Walk-forward 6 thang, retrain moi 20 phien, co phi/thue/slippage |
 | Ket qua dau ra | Diem Rule, diem ML, tong diem va tin hieu |
 
 ## 2. Cai dat va chay nhanh
@@ -109,6 +109,7 @@ python main.py --fetch-only
 | `./run.sh test` | Smoke test offline voi toi da 2 ma |
 | `./run.sh evaluate --symbols FPT,ACB` | Tao phan bo label, metrics va confusion matrix |
 | `./run.sh tune --symbols FPT,ACB` | So sanh ba cau hinh RF/XGBoost bang walk-forward |
+| `./run.sh backtest` | Backtest walk-forward VN30, so sanh DSS voi Buy & Hold va VNINDEX |
 | `./run.sh status` | Kiem tra du lieu, model va source |
 | `./run.sh clear-data` | Xoa CSV cache, giu lai model |
 | `./run.sh clean` | Xoa data cache, model va `__pycache__` |
@@ -150,6 +151,8 @@ flowchart TD
     H --> J["Total = Rule x 0.60 + ML x 0.40"]
     I --> J
     J --> K["Signal + reasons"]
+    K --> L["Phase 7: Walk-forward backtest"]
+    L --> M["DSS vs Buy & Hold vs VNINDEX"]
 ```
 
 ### Phase 1 - Fetch va cache
@@ -226,9 +229,9 @@ Ba chien luoc label:
 
 | Strategy | Quy tac |
 |---|---|
-| `fixed` | BUY neu loi nhuan sau 5 phien >= `+3%`; SELL neu <= `-3%`; con lai HOLD |
-| `volatility` | Nguong la `max(3%, 1.5 x ATR%)` tai thoi diem vao |
-| `triple_barrier` | Xem gia cao/thap trong 5 phien; barrier nao cham truoc thi gan BUY/SELL |
+| `fixed` | BUY neu loi nhuan gross sau 5 phien >= `3% + chi phi vong di-ve`; SELL doi xung; con lai HOLD |
+| `volatility` | Nguong la `max(3%, 1.5 x ATR%) + chi phi vong di-ve` |
+| `triple_barrier` | Xem high/low trong 5 phien voi barrier da cong chi phi; barrier nao cham truoc thi gan BUY/SELL |
 
 Production mac dinh dung `fixed` voi mapping:
 
@@ -307,6 +310,11 @@ Nhãn fixed:
 future_return = close[t+5] / close[t] - 1
 ```
 
+Label BUY/SELL chi duoc gan khi bien dong vuot `ML_PROFIT_THRESHOLD` cong chi
+phi giao dich vong di-ve. Mac dinh chi phi nay la `0,6%` theo phi, thue va
+slippage trong `config.py`, de label khong coi mot giao dich gross +3% la
+thang neu loi nhuan rong sau chi phi khong dat muc tieu.
+
 Nam dong cuoi khong co gia `t+5`, vi vay label la NaN va khong duoc dung de
 train.
 
@@ -341,6 +349,8 @@ Quy trinh nay dung expanding window:
 - Purge gap: 5 phien.
 - Khong shuffle.
 - Bao cao RF, XGB va Ensemble 50/50.
+- Bao cao them `BaselineHold` (luon doan HOLD) va `BaselineMomentum` (dung
+  `return_5d` de doan BUY/SELL), cung tren tung fold va aggregate.
 
 Metric can uu tien:
 
@@ -369,10 +379,10 @@ Snapshot report `reports/fixed_baseline/` hien co:
 
 | Label | So dong |
 |---|---:|
-| SELL | 3.586 |
-| HOLD | 13.211 |
-| BUY | 4.449 |
-| Tong | 21.246 |
+| SELL | 2.892 |
+| HOLD | 14.680 |
+| BUY | 3.690 |
+| Tong | 21.262 |
 
 Tren 29 ma co aggregate walk-forward metrics, trung binh theo ma cua
 Ensemble 50/50 la:
@@ -386,9 +396,49 @@ Ensemble 50/50 la:
 | SELL Precision | 0,218 |
 | SELL Recall | 0,168 |
 
-Day la ket qua phan loai, khong phai loi nhuan giao dich. Khong duoc suy ra
-rang DSS da vuot Buy & Hold khi chua co backtest hop le, phi giao dich va
-slippage.
+Trong snapshot nay, Ensemble co Macro F1 `0,327`, trong khi
+`BaselineMomentum` dat `0,271`. `BaselineHold` co accuracy cao hon do HOLD
+chiem da so, nhung balanced accuracy chi quanh `0,333`; vi vay khong dung
+accuracy don le de chon label hay model.
+
+Day la ket qua phan loai, khong phai loi nhuan giao dich. Xem phan Backtest
+ben duoi de biet ket qua loi nhuan thuc te.
+
+### Backtest walk-forward
+
+```bash
+./run.sh backtest
+./run.sh backtest --symbols FPT,HPG --months 6
+./run.sh backtest --limit 5 --months 3
+```
+
+Quy trinh trong `src/backtest/backtester.py`:
+
+- Cua so 6 thang cuoi (mac dinh), model chi hoc tu du lieu truoc do.
+- Retrain moi 20 phien tren tap da purge 5 phien (khong dung label cham
+  tuong lai).
+- Tin hieu tai close ngay i, khop lenh tai open ngay i+1.
+- Vao lenh khi Total `>= 60`, thoat khi du T+5 hoac Total `< 25` (cat lo).
+- Tru phi moi gioi `0,15%/chieu`, thue ban `0,1%` va slippage `0,1%/chieu`.
+
+Metric bao cao: so lenh, win rate, profit factor, loi nhuan tung lenh,
+DSS vs Buy & Hold vs VNINDEX, Sharpe va Maximum Drawdown. Ket qua ghi vao
+`reports/backtest_symbols.csv` va `reports/backtest_trades.csv`.
+
+Ket qua tham chieu 6 thang gan nhat (30 ma VN30):
+
+| Chi so | Gia tri |
+|---|---:|
+| Loi nhuan TB DSS | -0,55% |
+| Loi nhuan TB Buy & Hold | +7,56% |
+| Loi nhuan TB VNINDEX | +9,25% |
+| Sharpe TB | -0,18 |
+| Max drawdown TB | -7,29% |
+| Tong lenh | 124 |
+| So ma DSS thang Buy & Hold | 8/30 |
+
+Ket luan: trong giai doan uptrend manh nay, DSS chua vuot Buy & Hold. Dung
+backtest nay lam baseline de do cac cai tien label/feature/model ve sau.
 
 ### Tune
 
@@ -465,7 +515,9 @@ DSS/
 │   │   ├── scoring.py
 │   │   └── decision.py
 │   └── backtest/
+│       ├── backtester.py
 │       └── __init__.py
+├── backtest_runner.py
 ├── data/       # CSV cache, gitignored, tao sau khi fetch
 ├── models/     # file .pkl, gitignored
 └── reports/    # CSV danh gia, gitignored
@@ -475,11 +527,11 @@ DSS/
 
 | Tai lieu | Noi dung |
 |---|---|
+| [ML_HANDOVER_GUIDE.md](ML_HANDOVER_GUIDE.md) | Tai lieu ban giao toan bo quy trinh ML, label, validation, model va backtest |
+| [REPORT_METRICS.md](REPORT_METRICS.md) | Giai thich cac cot trong label, walk-forward, confusion matrix, tuning va backtest report |
 | [ml_training_walkthrough.md](ml_training_walkthrough.md) | Tham so train, label, validation, metrics va ket qua hien tai |
 | [dss_labels_reference.md](dss_labels_reference.md) | Tra cuu label va nguong diem; can doi chieu source neu co mau thuan |
 | [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Giai thich RF, XGBoost, ensemble va han che |
-| [implementation_plan.md](implementation_plan.md) | Y tuong kien truc 7 phase ban dau; mot so phase chua co source thuc thi |
-| [DSS_FULL_CODE_GUIDE.md](DSS_FULL_CODE_GUIDE.md) | Snapshot minh hoa cu, khong phai source of truth |
 
 Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
 `src/`.
@@ -493,7 +545,8 @@ Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
 - Ket qua phan loai hien tai con yeu va khong dong deu giua cac ma.
 - Model chi hoc tu OHLCV va VNINDEX, khong co tin tuc, bao cao tai chinh hay
   yeu to vi mo.
-- Chua co backtest giao dich day du voi phi, slippage, drawdown va Sharpe.
+- Backtest 6 thang gan nhat cho thay DSS chua vuot Buy & Hold; ket qua phu
+  thuoc manh vao giai doan thi truong va chua duoc toi uu tham so.
 - Ket qua qua khu khong dam bao ket qua tuong lai.
 
 Day la cong cu nghien cuu va ho tro ra quyet dinh. Nguoi dung tu chiu trach

@@ -15,6 +15,7 @@ ML_PROFIT_THRESHOLD = 0.03
 TEST_SIZE_RATIO = 0.2
 RANDOM_STATE = 42
 MIN_TRAIN_ROWS = 100
+BASELINE_MOMENTUM_THRESHOLD = 1.0  # percentage points over the last 5 sessions
 
 # Random Forest ("phòng thủ"): 200 cây độc lập, lá >=20 mẫu chống overfit,
 # balanced vì nhãn GIỮ thường chiếm đa số
@@ -49,6 +50,13 @@ SCORE_SELL = 25
 
 # ── 5. Backtest ──
 BACKTEST_MONTHS = 6
+BACKTEST_RETRAIN_DAYS = 20      # Walk-forward: train lại model mỗi N phiên
+BACKTEST_FEE_RATE = 0.0015      # Phí môi giới mỗi chiều (0.15%)
+BACKTEST_TAX_RATE = 0.001       # Thuế bán chứng khoán (0.1%)
+BACKTEST_SLIPPAGE_RATE = 0.001  # Trượt giá giả định mỗi chiều (0.1%)
+ML_LABEL_COST_RATE = (
+    2 * BACKTEST_FEE_RATE + BACKTEST_TAX_RATE + 2 * BACKTEST_SLIPPAGE_RATE
+)
 
 # ── 6. Đường dẫn ──
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -49,8 +49,8 @@ future_return[t] = close[t + 5] / close[t] - 1
 Voi label fixed:
 
 ```text
-future_return >= +0.03  -> BUY  (1)
-future_return <= -0.03  -> SELL (-1)
+future_return >= +(0.03 + chi_phi_vong_di_ve) -> BUY  (1)
+future_return <= -(0.03 + chi_phi_vong_di_ve) -> SELL (-1)
 con lai                  -> HOLD (0)
 ```
 
@@ -58,6 +58,7 @@ con lai                  -> HOLD (0)
 |---|---:|---|
 | `ML_FORWARD_DAYS` | `5` | Mo hinh nhin truoc 5 phien |
 | `ML_PROFIT_THRESHOLD` | `0.03` | Bien BUY/SELL ±3% |
+| `ML_LABEL_COST_RATE` | `0.006` | Chi phi phi/thue/slippage vong di-ve |
 
 `ML_FORWARD_DAYS` khong phai so ngay lich ma la so phien co du lieu. Nam dong
 cuoi khong co gia tuong lai nen label la NaN va bi loai khoi tap train.
@@ -76,7 +77,7 @@ de giai thich va de so sanh.
 Nguong moi mau duoc tinh:
 
 ```text
-dynamic_threshold = max(0.03, 1.5 x ATR% / 100)
+dynamic_threshold = max(0.03, 1.5 x ATR% / 100) + ML_LABEL_COST_RATE
 ```
 
 Co phieu bien dong manh can muc dich loi nhuan lon hon moi duoc gan BUY/SELL.
@@ -85,8 +86,8 @@ Co phieu bien dong manh can muc dich loi nhuan lon hon moi duoc gan BUY/SELL.
 
 Voi moi diem vao:
 
-- Upper barrier = gia vao x `1.03`.
-- Lower barrier = gia vao x `0.97`.
+- Upper barrier = gia vao x `(1 + 0.03 + ML_LABEL_COST_RATE)`.
+- Lower barrier = gia vao x `(1 - 0.03 - ML_LABEL_COST_RATE)`.
 - Quan sat high/low cua 5 phien tiep theo.
 - Barrier nao cham truoc se quyet dinh BUY hoac SELL.
 - Neu khong cham barrier nao thi gan HOLD.
@@ -191,6 +192,15 @@ Vi du:
 Tap train mo rong dan sau moi fold. `gap=5` la purge gap: label cua mot diem
 cuoi tap train co the nhin toi 5 phien tuong lai, nen can cach validation de
 tranh chong lan thong tin.
+
+Moi fold cung tinh hai baseline de dat moc so sanh:
+
+- `BaselineHold`: luon du doan HOLD.
+- `BaselineMomentum`: BUY khi `return_5d >= 1%`, SELL khi `return_5d <= -1%`,
+  con lai HOLD.
+
+Chi coi model co tien bo khi vuot baseline tren Macro F1 va balanced accuracy
+mot cach on dinh qua nhieu ma va fold.
 
 ## 5. Random Forest
 
@@ -597,7 +607,33 @@ Khong co gia tri `max_depth=10`, `learning_rate=0.05` hay threshold `3%` nao
 duoc dam bao la toi uu vinh vien. Chung la cau hinh hien tai, can duoc xac
 nhan lai khi du lieu, regime thi truong hoac muc tieu giao dich thay doi.
 
-## 13. Han che quan trong
+## 13. Backtest walk-forward
+
+`src/backtest/backtester.py` mo phong giao dich tren cua so 6 thang gan nhat:
+
+- Model chi hoc tu du lieu truoc ngay dang xet.
+- Retrain moi 20 phien tren tap da purge 5 phien.
+- Tin hieu tai close ngay i, khop lenh tai open ngay i+1.
+- Vao lenh khi Total `>= 60`; thoat khi du T+5 hoac Total `< 25`.
+- Chi phi: phi moi gioi `0,15%/chieu`, thue ban `0,1%`, slippage `0,1%/chieu`.
+
+Ket qua tham chieu 30 ma VN30, 6 thang gan nhat:
+
+| Chi so | Gia tri |
+|---|---:|
+| Loi nhuan TB DSS | -0,55% |
+| Loi nhuan TB Buy & Hold | +7,56% |
+| Loi nhuan TB VNINDEX | +9,25% |
+| Sharpe TB | -0,18 |
+| Max drawdown TB | -7,29% |
+| Tong lenh | 124 |
+| So ma DSS thang Buy & Hold | 8/30 |
+
+Trong giai doan uptrend manh nay, DSS chua vuot Buy & Hold. Day la baseline
+bat buoc phai cai thien truoc khi tin vao tin hieu ML. Chi tiet trong
+`reports/backtest_symbols.csv` va `reports/backtest_trades.csv`.
+
+## 14. Han che quan trong
 
 - Du lieu chuoi thoi gian co regime change; quy luat qua khu co the khong lap
   lai.
@@ -607,12 +643,12 @@ nhan lai khi du lieu, regime thi truong hoac muc tieu giao dich thay doi.
 - Prior calibration chi dieu chinh cach doc xac suat, khong tao them thong
   tin du bao.
 - Chua co calibration day du cho probability, chi co prior correction.
-- Chua co backtest production voi phi giao dich, slippage, position sizing,
-  Sharpe hay maximum drawdown.
+- Backtest hien co phi/slippage/Sharpe/MDD, nhung position sizing van la
+  all-in mot ma va chua mo phong danh muc nhieu ma cung luc.
 - Report CSV la snapshot tai thoi diem chay, khong tu dong cap nhat neu data
   thay doi.
 
-## 14. Lenh tham khao
+## 15. Lenh tham khao
 
 ```bash
 # Train lai hai ma tu cache
@@ -629,4 +665,7 @@ python main.py --no-fetch --symbols FPT,ACB --retrain
 
 # So sanh cau hinh
 ./run.sh tune --symbols FPT,ACB
+
+# Backtest walk-forward co phi
+./run.sh backtest --symbols FPT,HPG --months 6
 ```

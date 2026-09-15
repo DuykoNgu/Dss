@@ -87,11 +87,11 @@ cmd_backtest() {
     activate_venv
 
     if [ ! -f "$PROJECT_DIR/backtest_runner.py" ]; then
-        echo -e "${RED}❌ Chưa có file backtest_runner.py. Hãy tạo theo DSS_FULL_CODE_GUIDE.md${NC}"
+        echo -e "${RED}❌ Chưa có file backtest_runner.py. Hãy tham khảo README.md để biết cấu trúc và cách chạy.${NC}"
         exit 1
     fi
 
-    python3 "$PROJECT_DIR/backtest_runner.py"
+    python3 "$PROJECT_DIR/backtest_runner.py" "$@"
 }
 
 cmd_test_phase() {
@@ -322,7 +322,7 @@ case "${1:-help}" in
     setup)    cmd_setup ;;
     fetch)    shift; cmd_fetch "$@" ;;
     dss)      shift; cmd_dss "$@" ;;
-    backtest) cmd_backtest ;;
+    backtest) shift; cmd_backtest "$@" ;;
     test)     shift; cmd_test_phase "$@" ;;
     evaluate) shift; cmd_evaluate "$@" ;;
     tune)     shift; cmd_tune "$@" ;;

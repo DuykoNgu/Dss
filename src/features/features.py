@@ -1,10 +1,5 @@
 """Phase 4: Feature engineering (19 features tương đối) + gán nhãn T+5."""
 
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import pandas as pd
 import ta
 
@@ -101,14 +96,22 @@ def _build_labels(
     strategy: str,
 ) -> pd.Series:
     """Build alternative labels using future data only for the target."""
+    if forward_days <= 0:
+        raise ValueError("forward_days phải lớn hơn 0")
+    if threshold < 0:
+        raise ValueError("threshold không được âm")
+
     future_return = df["future_return"]
     labels = pd.Series(float("nan"), index=df.index)
+    net_threshold = threshold + config.ML_LABEL_COST_RATE
 
     if strategy == "fixed":
-        buy = future_return >= threshold
-        sell = future_return <= -threshold
+        buy = future_return >= net_threshold
+        sell = future_return <= -net_threshold
     elif strategy == "volatility":
-        dynamic_threshold = (df["atr_pct"] / 100.0 * 1.5).clip(lower=threshold)
+        dynamic_threshold = (
+            df["atr_pct"] / 100.0 * 1.5
+        ).clip(lower=threshold) + config.ML_LABEL_COST_RATE
         buy = future_return >= dynamic_threshold
         sell = future_return <= -dynamic_threshold
     elif strategy == "triple_barrier":
@@ -116,8 +119,8 @@ def _build_labels(
         sell = pd.Series(False, index=df.index)
         for position in range(len(df) - forward_days):
             entry = float(df["close"].iloc[position])
-            upper = entry * (1 + threshold)
-            lower = entry * (1 - threshold)
+            upper = entry * (1 + net_threshold)
+            lower = entry * (1 - net_threshold)
             window = df.iloc[position + 1:position + forward_days + 1]
             hit_buy = window["high"] >= upper
             hit_sell = window["low"] <= lower
