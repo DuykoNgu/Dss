@@ -41,12 +41,16 @@ def calculate_rule_based_score(df: pd.DataFrame) -> tuple[float, list[str]]:
     macd_hist = _num(latest.get("macd_hist"))
     prev_hist = _num(prev.get("macd_hist"))
 
+    # Một nhánh duy nhất: uptrend đã bao gồm "giá trên SMA50", không cộng trùng
     if close > sma_50 > sma_200 > 0:
         score += 10
         reasons.append("Uptrend mạnh (Giá > SMA50 > SMA200)")
     elif 0 < close < sma_50 < sma_200:
         score -= 8
         reasons.append("Downtrend (Giá < SMA50 < SMA200)")
+    elif close > sma_50 > 0:
+        score += 5
+        reasons.append("Giá trên SMA50")
 
     if _recent_flag(df.get("golden_cross")):
         score += 8
@@ -61,10 +65,6 @@ def calculate_rule_based_score(df: pd.DataFrame) -> tuple[float, list[str]]:
     elif macd < macd_signal:
         score -= 10
         reasons.append("MACD dưới Signal")
-
-    if close > sma_50 > 0:
-        score += 5
-        reasons.append("Giá trên SMA50")
 
     rsi = _num(latest.get("rsi"), default=50.0)
     prev_rsi = _num(prev.get("rsi"), default=rsi)
@@ -136,7 +136,7 @@ def calculate_rule_based_score(df: pd.DataFrame) -> tuple[float, list[str]]:
     if vnindex_vs_sma50 > 0:
         score += 5
         reasons.append("VNINDEX trên SMA50")
-    else:
+    elif vnindex_vs_sma50 < 0:  # = 0 khi thiếu dữ liệu VNINDEX -> không trừ điểm
         score -= 5
         reasons.append("VNINDEX dưới SMA50")
     if vnindex_return_5d > 1.0:

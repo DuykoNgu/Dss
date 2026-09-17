@@ -1,0 +1,67 @@
+effective_date,action,symbol,source
+2020-08-03,base,BID,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,CTG,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,EIB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,FPT,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,GAS,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,HDB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,HPG,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,KDH,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,MBB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,MSN,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,MWG,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,NVL,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,PLX,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,PNJ,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,POW,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,REE,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,ROS,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,SAB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,SBT,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,SSI,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,STB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,TCB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,TCH,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VCB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VHM,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VIC,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VJC,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VNM,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VPB,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2020-08-03,base,VRE,suy nguoc tu cac ky sau (ro hien tai tru nguoc cac thay doi)
+2021-02-01,add,BVH,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-02-01,add,PDR,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-02-01,add,TPB,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-02-01,remove,SAB,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-02-01,remove,EIB,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-02-01,remove,ROS,https://vietnambiz.vn/sab-eib-va-ros-roi-ro-vn30-bvh-pdr-va-tpb-duoc-them-moi-20210119192037877.htm
+2021-08-02,add,ACB,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2021-08-02,add,SAB,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2021-08-02,add,GVR,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2021-08-02,remove,TCH,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2021-08-02,remove,SBT,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2021-08-02,remove,REE,https://vietstock.vn/2021/07/dao-danh-muc-vn30-them-acb-sab-gvr-830-876138.htm
+2022-02-07,none,,https://vietstock.vn/2022/01/dao-vn30-ky-thang-12022-giu-nguyen-danh-muc-830-925174.htm
+2022-08-01,add,VIB,https://thitruongtaichinhtiente.vn/ket-qua-thay-doi-danh-muc-hose-index-ky-quy-iii-2022-vnfin-lead-them-moi-shb-va-hcm-vn30-them-moi-vib-va-loai-pnj-41519.html
+2022-08-01,remove,PNJ,https://thitruongtaichinhtiente.vn/ket-qua-thay-doi-danh-muc-hose-index-ky-quy-iii-2022-vnfin-lead-them-moi-shb-va-hcm-vn30-them-moi-vib-va-loai-pnj-41519.html
+2023-02-06,add,BCM,https://vneconomy.vn/nhom-vn30-chinh-thuc-co-tan-binh-thay-the-cho-kdh.htm
+2023-02-06,remove,KDH,https://vneconomy.vn/nhom-vn30-chinh-thuc-co-tan-binh-thay-the-cho-kdh.htm
+2023-08-07,add,SHB,https://vietstock.vn/2023/07/dao-danh-muc-vn30-them-2-ma-ngan-hang-shb-ssb-830-1088399.htm
+2023-08-07,add,SSB,https://vietstock.vn/2023/07/dao-danh-muc-vn30-them-2-ma-ngan-hang-shb-ssb-830-1088399.htm
+2023-08-07,remove,NVL,https://vietstock.vn/2023/07/dao-danh-muc-vn30-them-2-ma-ngan-hang-shb-ssb-830-1088399.htm
+2023-08-07,remove,PDR,https://vietstock.vn/2023/07/dao-danh-muc-vn30-them-2-ma-ngan-hang-shb-ssb-830-1088399.htm
+2024-02-05,none,,https://vietstock.vn/2024/01/dao-danh-muc-vn30-ky-thang-12024-khong-co-thay-doi-trong-ro-chi-so-chinh-3358-1145998.htm
+2024-08-05,none,,https://vietstock.vn/2024/07/dao-danh-muc-vn30-ky-thang-72024-khong-co-thay-doi-trong-ro-chi-so-chinh-nvl-vao-danh-sach-du-phong-3358-1208140.htm
+2025-02-03,add,LPB,https://vneconomy.vn/co-phieu-lpb-chinh-thuc-lot-ro-vn30-pow-bi-loai.htm
+2025-02-03,remove,POW,https://vneconomy.vn/co-phieu-lpb-chinh-thuc-lot-ro-vn30-pow-bi-loai.htm
+2025-04-28,none,,https://thoibaotaichinhvietnam.vn/ket-qua-thay-doi-danh-muc-chi-so-vn30-ky-quy-ii2025-174751.html
+2025-08-04,add,DGC,https://vietstock.vn/2025/07/dao-danh-muc-vn30-ky-thang-72025-them-dgc-loai-bvh-3358-1329029.htm
+2025-08-04,remove,BVH,https://vietstock.vn/2025/07/dao-danh-muc-vn30-ky-thang-72025-them-dgc-loai-bvh-3358-1329029.htm
+2026-02-02,add,VPL,https://vietstock.vn/2026/01/dao-danh-muc-vn30-ky-thang-12026-vpl-gia-nhap-bcm-bi-loai-ra-3358-1393781.htm
+2026-02-02,remove,BCM,https://vietstock.vn/2026/01/dao-danh-muc-vn30-ky-thang-12026-vpl-gia-nhap-bcm-bi-loai-ra-3358-1393781.htm
+2026-05-13,add,BSR,https://vietstock.vn/2026/05/dgc-bi-loai-khoi-vn30-bsr-thay-the-830-1439738.htm
+2026-05-13,remove,DGC,https://vietstock.vn/2026/05/dgc-bi-loai-khoi-vn30-bsr-thay-the-830-1439738.htm
+2026-08-03,add,MCH,https://vietstock.vn/2026/07/mch-tcx-vao-ro-vn30-3358-1466674.htm
+2026-08-03,add,TCX,https://vietstock.vn/2026/07/mch-tcx-vao-ro-vn30-3358-1466674.htm
+2026-08-03,remove,PLX,https://vietstock.vn/2026/07/mch-tcx-vao-ro-vn30-3358-1466674.htm
+2026-08-03,remove,TPB,https://vietstock.vn/2026/07/mch-tcx-vao-ro-vn30-3358-1466674.htm

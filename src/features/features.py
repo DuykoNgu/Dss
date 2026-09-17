@@ -1,4 +1,4 @@
-"""Phase 4: Feature engineering (19 features tương đối) + gán nhãn T+5."""
+"""Phase 4: Feature engineering (19 features tương đối) + gán nhãn T+N (mặc định N=5)."""
 
 import pandas as pd
 import ta
@@ -67,8 +67,11 @@ def build_features_and_labels(
         idx["vnindex_return_5d"] = idx["indexValue"].pct_change(5) * 100
         idx["vnindex_return_20d"] = idx["indexValue"].pct_change(20) * 100
         idx["vnindex_volatility_20d"] = idx["indexValue"].pct_change().rolling(20).std() * 100
+        # Chỉ dùng cho nhãn "excess" (nhìn tương lai) -> không bao giờ được là feature
+        idx["vnindex_future_return"] = idx["indexValue"].shift(-forward_days) / idx["indexValue"] - 1
         df = pd.merge(df, idx[["time", "vnindex_vs_sma50", "vnindex_return_5d",
-                               "vnindex_return_20d", "vnindex_volatility_20d"]],
+                               "vnindex_return_20d", "vnindex_volatility_20d",
+                               "vnindex_future_return"]],
                       on="time", how="left")
         market_columns = ["vnindex_vs_sma50", "vnindex_return_5d",
                           "vnindex_return_20d", "vnindex_volatility_20d"]
@@ -80,6 +83,9 @@ def build_features_and_labels(
         df["vnindex_volatility_20d"] = 0.0
 
     df["relative_strength_5d"] = df["return_5d"] - df["vnindex_return_5d"]
+
+    if "vnindex_future_return" not in df.columns:
+        df["vnindex_future_return"] = float("nan")
 
     # Nhãn dùng tương lai -> NaN ở `forward_days` dòng cuối (Phase 5 phải drop, cấm làm feature)
     df["future_return"] = close.shift(-forward_days) / close - 1
@@ -114,6 +120,12 @@ def _build_labels(
         ).clip(lower=threshold) + config.ML_LABEL_COST_RATE
         buy = future_return >= dynamic_threshold
         sell = future_return <= -dynamic_threshold
+    elif strategy == "excess":
+        # Lợi nhuận vượt VNINDEX cùng kỳ: BUY khi thắng thị trường đủ bù chi phí
+        excess = future_return - df["vnindex_future_return"]
+        buy = excess >= net_threshold
+        sell = excess <= -net_threshold
+        future_return = excess
     elif strategy == "triple_barrier":
         buy = pd.Series(False, index=df.index)
         sell = pd.Series(False, index=df.index)
@@ -131,7 +143,7 @@ def _build_labels(
             elif first_sell is not None and (first_buy is None or first_sell < first_buy):
                 sell.iloc[position] = True
     else:
-        raise ValueError("label_strategy phải là fixed, volatility hoặc triple_barrier")
+        raise ValueError("label_strategy phải là fixed, volatility, excess hoặc triple_barrier")
 
     labels.loc[buy] = 1
     labels.loc[sell] = -1

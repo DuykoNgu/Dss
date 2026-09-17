@@ -1,6 +1,10 @@
 # 🧠 Phân Tích Thuật Toán — Hệ thống DSS VN30
 
-Tài liệu giải thích chi tiết **tại sao chọn**, **cách hoạt động**, và **cách sử dụng** từng thuật toán trong hệ thống.
+Tài liệu giải thích **lý thuyết** và **cách dùng** từng thuật toán trong hệ thống.
+
+> Đây là tài liệu lý thuyết, không phải bằng chứng hiệu quả. Kết quả đo thực tế
+> (walk-forward, backtest so sánh blend/rule/ml, rank IC) nằm trong `README.md`.
+> Khi tài liệu khác code, tin `config.py` và `src/`.
 
 ---
 
@@ -25,7 +29,7 @@ Tài liệu giải thích chi tiết **tại sao chọn**, **cách hoạt độn
 ### 1.2. Pipeline thuật toán
 
 ```
-Dữ liệu OHLCV (750 phiên)
+Dữ liệu OHLCV nến ngày (~8 năm)
     │
     ▼
 Tính 20+ Features (Chỉ báo kỹ thuật biến đổi)
@@ -39,7 +43,7 @@ Gán nhãn T+5 (MUA / GIỮ / BÁN)
     │                                │
     │                    Trung bình xác suất (Ensemble)
     │                                │
-    │                         ML Score = P(MUA) hiệu chỉnh prior × 100
+    │              ML Score = 50 + 50 × (P(MUA) − P(BÁN)), đã hiệu chỉnh prior
     │                                │
     └──► Rule-Based ──────────► Rule Score (0-100)
                                      │
@@ -363,7 +367,15 @@ Cả 2 model train với trọng số class **cân bằng** (chống "lười" �
 P_hiệu_chỉnh(c) = P_trung_bình(c) × (prior_thật(c) / ⅓)   →   chuẩn hóa lại tổng = 1
 ```
 
-Nếu bỏ bước này, ML Score sẽ bị thổi phồng gấp ~1.5–2 lần so với khả năng tăng giá thật. Con số sau hiệu chỉnh mới được dùng làm ML Score.
+Sau hiệu chỉnh, ML Score được đưa về cùng thang với Rule Score (50 = trung tính):
+
+```
+ML Score = 50 + 50 × (P(MUA) − P(BÁN))
+```
+
+Không dùng thẳng `P(MUA) × 100`: vì MUA chỉ chiếm ~20% nhãn, xác suất này hiếm
+khi vượt 0,5, nên điểm ML sẽ luôn thấp và kéo tổng điểm xuống như một lá phiếu
+phủ quyết thay vì góp 40% ý kiến.
 
 ### 4.3. Khi nào Ensemble đặc biệt hữu ích?
 
@@ -392,29 +404,29 @@ Trường hợp **bất đồng** là lúc Ensemble phát huy giá trị nhất:
 ```
 
 ```
-✅ ĐÚNG (Walk-Forward):
-[──────── Train (80% đầu) ────────] [── Test (20% cuối) ──]
- 2023-09 ──────────────── 2025-12    2026-01 ────── 2026-08
+✅ ĐÚNG (Walk-Forward mở rộng dần, bỏ 5 phiên ở ranh giới):
+[train 50%] [gap 5] [val 10%]
+[train 60%] [gap 5] [val 10%]
+[train 70%] [gap 5] [val 10%] ...
 
 → Model chỉ học từ quá khứ, kiểm tra trên tương lai
-→ Đúng với logic thực tế: bạn không thể dùng data ngày mai để quyết định hôm nay
+→ Gap 5 phiên: nhãn T+5 của các dòng cuối train không được chạm vào vùng validation
 ```
 
 ### 5.2. Cách thực hiện trong DSS
 
-```python
-# KHÔNG shuffle, KHÔNG random
-split_idx = int(len(X) * 0.80)  # 80% đầu tiên
-
-X_train = X.iloc[:split_idx]     # Phiên 1 → 600 (quá khứ)
-X_test  = X.iloc[split_idx:]     # Phiên 601 → 750 (gần đây nhất)
-```
+- `src/models/validation.py`: walk-forward như trên, báo cáo RF/XGB/Ensemble và 2 baseline.
+- `src/backtest/backtester.py`: retrain mỗi 20 phiên, mỗi lần chỉ dùng dữ liệu có nhãn đã biết.
+- Model production (`train_ml_models`) train trên **toàn bộ** dữ liệu có nhãn để dùng cả
+  giai đoạn gần nhất; metric holdout 20% cuối chỉ in ra để tham khảo.
 
 ### 5.3. Ý nghĩa thực tế
 
 Walk-Forward trả lời câu hỏi: *"Nếu tôi train model vào cuối năm 2025 và dùng nó để giao dịch từ đầu năm 2026, kết quả sẽ như thế nào?"*
 
-Đây chính xác là cách hệ thống sẽ được sử dụng trong thực tế. Vì vậy, Accuracy trên tập Walk-Forward test **đáng tin cậy hơn nhiều** so với Random Split.
+Metric walk-forward trung thực hơn nhiều so với random split, nhưng vẫn chỉ đo độ đúng
+của nhãn. Balanced accuracy ~0,333 (3 lớp) nghĩa là ngang đoán ngẫu nhiên; chất lượng
+quyết định phải xem thêm backtest sau phí.
 
 ---
 
@@ -455,22 +467,22 @@ Walk-Forward trả lời câu hỏi: *"Nếu tôi train model vào cuối năm 2
 [Xu hướng]
   ✅ Giá > SMA50 > SMA200 (Uptrend)   +10.0  →  60.0
   ✅ MACD > Signal, Histogram tăng     +7.0   →  67.0
-  ✅ Giá > SMA50                       +5.0   →  72.0
+     (không cộng thêm "Giá > SMA50" vì uptrend đã bao gồm điều kiện này)
 
 [Động lượng]
-  ✅ RSI = 55 (Vùng tích cực)          +7.0   →  79.0
+  ✅ RSI = 55 (Vùng tích cực)          +7.0   →  74.0
 
 [Khối lượng]
-  ✅ OBV tăng 5 phiên                  +5.0   →  84.0
+  ✅ OBV tăng 5 phiên                  +5.0   →  79.0
 
 [Biến động]
-  ✅ BB position = 0.35 (Tích lũy)     +4.0   →  88.0
-  ✅ ATR < 3%                          +3.0   →  91.0
+  ✅ BB position = 0.35 (Tích lũy)     +4.0   →  83.0
+  ✅ ATR < 3%                          +3.0   →  86.0
 
 [Thị trường]
-  ✅ VNINDEX > SMA50                   +5.0   →  96.0
+  ✅ VNINDEX > SMA50                   +5.0   →  91.0
 
-→ Rule Score = min(96.0, 100) = 96.0 điểm
+→ Rule Score = min(91.0, 100) = 91.0 điểm
 → Lý do: "Uptrend mạnh; MACD tích cực"
 ```
 
@@ -484,8 +496,8 @@ Walk-Forward trả lời câu hỏi: *"Nếu tôi train model vào cuối năm 2
 | **Cách học** | 200 cây độc lập, bỏ phiếu | 300 cây tuần tự, sửa lỗi | Không học — dùng quy tắc cố định |
 | **Thế mạnh** | Ổn định, chống nhiễu | Chính xác, bắt pattern tinh vi | Dễ hiểu, luôn có lý do |
 | **Điểm yếu** | Bảo thủ, có thể bỏ lỡ | Dễ overfit | Cứng nhắc, bỏ lỡ pattern phức tạp |
-| **Vai trò trong DSS** | Model chính (Ensemble 50%) | Model bổ sung (Ensemble 50%) | Nền tảng an toàn (Trọng số 60%) |
-| **Khi nào tỏa sáng?** | Thị trường nhiễu, sideway | Thị trường có xu hướng rõ | Mọi lúc — là "phanh hãm" rủi ro |
+| **Vai trò trong DSS** | Ensemble 50% trong ML Score | Ensemble 50% trong ML Score | Trọng số 60% trong tổng điểm |
+| **Đã kiểm chứng?** | Walk-forward + backtest (xem README) | Walk-forward + backtest | Chỉ qua backtest nguồn điểm `rule` |
 
 ---
 
@@ -503,7 +515,7 @@ Walk-Forward trả lời câu hỏi: *"Nếu tôi train model vào cuối năm 2
 - `max_depth` giới hạn (10 cho RF, 6 cho XGBoost) → Ngăn cây quá phức tạp
 - `min_samples_leaf=20` → Mỗi quy tắc phải dựa trên ít nhất 20 phiên
 - Walk-Forward validation → Kiểm tra trên dữ liệu "chưa từng thấy"
-- Rule-Based chiếm 60% → Dù ML overfit thì hệ thống vẫn có 60% dựa trên logic vững
+- So sánh với baseline (luôn GIỮ, momentum) và backtest từng nguồn điểm → phát hiện khi ML không thêm giá trị
 
 ### 8.2. Data Snooping (Nhìn trộm tương lai)
 
@@ -528,206 +540,6 @@ df['future_5d_return'] = df['close'].shift(-5) / df['close'] - 1
 - Giai đoạn 2022: Lãi suất tăng, mọi thứ giảm → RSI < 30 vẫn giảm tiếp
 
 **Cách giảm thiểu:**
-- Train lại model định kỳ (mỗi lần chạy DSS đều train lại từ đầu với data mới nhất)
-- Rule-Based đóng vai trò "ổn định" — RSI quá mua vẫn là cảnh báo bất kể market regime
-- Ensemble giảm rủi ro — nếu 1 model bối rối, model kia có thể vẫn đúng
-
----
-
-## 9. Tính Kết Hợp Bổ Trợ — Tại Sao Pipeline Mạnh Hơn Từng Phần Riêng Lẻ?
-
-Đây là phần **cốt lõi** của thiết kế hệ thống: 3 thuật toán (Random Forest, XGBoost, Rule-Based) không hoạt động riêng lẻ mà **bổ trợ nhau theo chuỗi pipeline**, mỗi thuật toán đóng một vai trò khác nhau để bù đắp điểm mù của thuật toán còn lại.
-
-### 9.1. Ba "Lớp Phòng Thủ" của hệ thống
-
-Hãy hình dung hệ thống như một đội **3 chuyên gia** cùng đánh giá một cổ phiếu:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    DỮ LIỆU CỔ PHIẾU (19 FEATURES)             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-            ┌────────────────┼────────────────┐
-            ▼                ▼                ▼
-   ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐
-   │ RANDOM      │  │ XGBOOST     │  │ RULE-BASED      │
-   │ FOREST      │  │             │  │ (Chuyên gia TA) │
-   │             │  │             │  │                 │
-   │ Vai trò:    │  │ Vai trò:    │  │ Vai trò:        │
-   │ "PHÒNG THỦ" │  │ "TẤN CÔNG"  │  │ "TRỌNG TÀI"    │
-   │             │  │             │  │                 │
-   │ Ổn định,    │  │ Nhạy bén,   │  │ Kinh nghiệm,   │
-   │ ít sai lầm  │  │ phát hiện   │  │ giải thích      │
-   │ lớn         │  │ cơ hội sớm  │  │ được, an toàn   │
-   └──────┬──────┘  └──────┬──────┘  └────────┬────────┘
-          │                │                   │
-          ▼                ▼                   │
-   ┌──────────────────────────┐                │
-   │   ENSEMBLE (50/50)       │                │
-   │   ML Score = P(MUA) hiệu chỉnh prior × 100  │                │
-   └────────────┬─────────────┘                │
-                │                              │
-                ▼ (40%)                        ▼ (60%)
-        ┌───────────────────────────────────────────┐
-        │     TỔNG ĐIỂM = Rule × 60% + ML × 40%    │
-        │                                           │
-        │  → Quyết định cuối cùng phải đi qua       │
-        │    CẢ 3 THUẬT TOÁN mới được ra tín hiệu   │
-        └───────────────────────────────────────────┘
-```
-
-### 9.2. Mỗi thuật toán giải quyết MỘT LOẠI VẤN ĐỀ khác nhau
-
-| Vấn đề cần giải quyết | Thuật toán phụ trách | Tại sao thuật toán này? |
-|------------------------|---------------------|------------------------|
-| **"Đa số trường hợp bình thường, pattern cơ bản"** | Random Forest | RF là "bình quân" của 200 cây → Rất giỏi ở những tình huống phổ biến, lặp đi lặp lại. Ví dụ: RSI < 30 + Volume tăng → Thường tăng giá. RF bắt tốt pattern này vì nó xuất hiện nhiều lần trong dữ liệu. |
-| **"Trường hợp hiếm, pattern phức tạp ẩn"** | XGBoost | XGBoost tập trung vào những điểm dữ liệu mà các cây trước **đoán sai**. Nghĩa là nó chuyên bắt những pattern mà RF bỏ lỡ — ví dụ: "RSI = 45 (trung tính) NHƯNG MACD histogram đang tăng tốc VÀ volume đột biến ở phiên trước" → Đây là combo tinh vi mà RF không nhìn ra. |
-| **"Đảm bảo quyết định có logic, không phi lý"** | Rule-Based | Dù ML nói gì, Rule-Based kiểm tra lại bằng logic phân tích kỹ thuật cơ bản. Nếu RSI = 90 (quá mua cực mạnh) mà ML vẫn bảo MUA → Rule-Based sẽ trừ điểm nặng, kéo tổng điểm xuống → Ngăn chặn quyết định phi lý. |
-
-### 9.3. Bốn tình huống thực tế minh họa sự bổ trợ
-
-#### Tình huống A: CẢ 3 ĐỒNG THUẬN → Tín hiệu cực mạnh
-
-```
-Bối cảnh: Cổ phiếu HPG — Giá vừa breakout khỏi kháng cự, volume x2
-
-Random Forest:  P(MUA) = 72%  → ML Score RF = 72
-XGBoost:        P(MUA) = 78%  → ML Score XGB = 78
-─────────────────────────────────────────────────
-Ensemble ML Score:              (72 + 78) / 2 = 75.0
-
-Rule-Based:     SMA uptrend (+10), MACD cắt lên (+7), Volume bùng nổ (+10)
-                RSI phục hồi (+10), BB bật từ dưới (+8), VNINDEX tốt (+5)
-                Rule Score = 50 + 10 + 7 + 10 + 10 + 8 + 5 = 100 → Cap: 100
-
-TOTAL = 100 × 0.6 + 75 × 0.4 = 60 + 30 = 90.0
-→ 🟢 MUA MẠNH (90/100)
-→ Tất cả thuật toán cùng đồng ý → Tín hiệu đáng tin cậy nhất!
-```
-
-**Ý nghĩa pipeline:** Khi cả 3 "chuyên gia" đều gật đầu, xác suất đúng là cao nhất. Đây là lúc nhà đầu tư nên tự tin nhất.
-
----
-
-#### Tình huống B: ML MUA nhưng RULES BÁN → Pipeline "phanh" lại
-
-```
-Bối cảnh: Cổ phiếu TCB — ML phát hiện pattern ẩn nhưng chỉ báo TA tiêu cực
-
-Random Forest:  P(MUA) = 68%  → ML Score RF = 68
-XGBoost:        P(MUA) = 74%  → ML Score XGB = 74
-─────────────────────────────────────────────────
-Ensemble ML Score:              (68 + 74) / 2 = 71.0
-
-Rule-Based:     SMA downtrend (-8), Death Cross (-10), MACD < Signal (-10)
-                RSI quá mua (-8), Volume xả hàng (-10)
-                Rule Score = 50 - 8 - 10 - 10 - 8 - 10 = 4.0
-
-TOTAL = 4 × 0.6 + 71 × 0.4 = 2.4 + 28.4 = 30.8
-→ 🟠 BÁN (31/100) — dù ML bảo MUA!
-```
-
-**Ý nghĩa pipeline:** ML có thể bị **overfit** — nó "thấy" một pattern trong quá khứ (ví dụ: mỗi lần RSI = 45 kết hợp một feature nào đó thì giá tăng), nhưng lần này bối cảnh hoàn toàn khác (Death Cross, downtrend nặng). Rule-Based đóng vai trò **phanh hãm khẩn cấp**: "Không, tất cả chỉ báo cơ bản đều nói GIẢM. ML có thể sai!" Trọng số 60% cho Rules đảm bảo hệ thống **ưu tiên an toàn** hơn mạo hiểm.
-
----
-
-#### Tình huống C: RULES TRUNG TÍNH nhưng ML phát hiện tín hiệu sớm
-
-```
-Bối cảnh: Cổ phiếu FPT — Sideway, chỉ báo TA đều ở vùng trung tính, 
-          nhưng ML phát hiện tổ hợp features ẩn (OBV slope + MACD hist slope + vol_ratio)
-
-Random Forest:  P(MUA) = 52%  → ML Score RF = 52 (RF bảo thủ, chưa chắc)
-XGBoost:        P(MUA) = 78%  → ML Score XGB = 78 (XGB nhạy, bắt pattern sớm)
-─────────────────────────────────────────────────
-Ensemble ML Score:              (52 + 78) / 2 = 65.0
-
-Rule-Based:     Mọi chỉ báo đều ở vùng trung tính (±0 điểm)
-                Rule Score = 50.0 (điểm khởi đầu, không cộng không trừ)
-
-TOTAL = 50 × 0.6 + 65 × 0.4 = 30 + 26 = 56.0
-→ ⚪ GIỮ (56/100) — chưa đủ tự tin để MUA
-```
-
-**Ý nghĩa pipeline:** Đây là trường hợp thú vị nhất!
-- **XGBoost** bắt được pattern sớm mà RF và Rules không thấy (vì Boosting chuyên tìm pattern ẩn trong dữ liệu mà Bagging bỏ lỡ).
-- **Random Forest** thận trọng hơn (52% — gần như đồng xu), đóng vai trò "kiểm tra lại" — nếu RF không thấy thì pattern đó có thể chưa đủ mạnh.
-- **Rule-Based** trung tính (50) — chưa có tín hiệu rõ ràng.
-- **Kết quả:** GIỮ (56) — Pipeline **không vội vàng MUA** chỉ vì 1 trong 3 thuật toán nói MUA. Nó chờ thêm xác nhận. Nếu ngày hôm sau XGBoost vẫn mạnh VÀ RF bắt đầu tăng VÀ Rules bắt đầu dương → Lúc đó mới chuyển sang MUA.
-
----
-
-#### Tình huống D: RF và XGB BẤT ĐỒNG → Ensemble tự giảm confidence
-
-```
-Bối cảnh: Cổ phiếu VNM — Thị trường biến động, tín hiệu lẫn lộn
-
-Random Forest:  P(MUA) = 70%  → "Tôi thấy pattern uptrend cơ bản"
-XGBoost:        P(BÁN) = 60%, P(MUA) = 25%  → "Tôi thấy pattern đảo chiều tinh vi"
-─────────────────────────────────────────────────
-Ensemble ML Score:              (70 + 25) / 2 = 47.5 → GIỮ vùng
-
-Rule-Based:     SMA trung tính (+5), RSI = 62 (tích cực nhẹ, +7)
-                Rule Score = 50 + 5 + 7 = 62
-
-TOTAL = 62 × 0.6 + 47.5 × 0.4 = 37.2 + 19.0 = 56.2
-→ ⚪ GIỮ (56/100)
-```
-
-**Ý nghĩa pipeline:**
-- RF thấy pattern đơn giản (uptrend) → MUA 70%.
-- XGBoost thấy pattern phức tạp hơn (dấu hiệu đảo chiều mà RF bỏ lỡ) → BÁN 60%.
-- Ensemble **tự động hạ confidence** về 47.5 khi 2 model bất đồng. Đây là cơ chế **tự bảo vệ tuyệt vời** — thay vì chọn theo 1 bên, nó nói *"2 chuyên gia không đồng ý → Tốt nhất là CHỜ"*.
-
-### 9.4. Bảng tổng hợp: Khi nào thuật toán nào "cứu" hệ thống?
-
-| Tình huống thị trường | RF một mình | XGB một mình | Rules một mình | **Pipeline kết hợp** |
-|----------------------|-------------|-------------|---------------|---------------------|
-| **Uptrend rõ ràng** (mọi chỉ báo tốt) | ✅ MUA đúng | ✅ MUA đúng | ✅ MUA đúng | ✅ MUA MẠNH (cả 3 đồng thuận) |
-| **Sideway nhiễu** (tín hiệu lẫn lộn) | ⚠️ Hay đoán sai (RF bảo thủ → GIỮ khi nên MUA) | ❌ Hay đoán sai (XGB quá nhạy → MUA khi nên GIỮ) | ⚠️ Trung tính mãi (không bao giờ phát hiện cơ hội sớm) | ✅ GIỮ chờ (an toàn, không mất tiền) |
-| **Đảo chiều bất ngờ** (tin xấu, crash) | ❌ Phản ứng chậm (200 cây "bỏ phiếu" mất thời gian cập nhật) | ✅ Phát hiện sớm (Boosting nhạy với dữ liệu mới) | ✅ Death Cross, RSI lao dốc → BÁN ngay | ✅ BÁN (XGB + Rules cùng cảnh báo, dù RF chậm) |
-| **ML bị overfit** (pattern quá khứ không lặp lại) | ❌ Overfit | ❌ Overfit | ✅ Vẫn đúng (logic cơ bản không thay đổi) | ✅ Rules chiếm 60% → kéo hệ thống về đúng hướng |
-| **Pattern phức tạp ẩn** (tổ hợp 5+ features) | ⚠️ Bắt được một phần | ✅ Bắt tốt nhất | ❌ Không bắt được (Rules chỉ kiểm tra từng chỉ báo) | ✅ ML Score tăng, đẩy tổng điểm lên (dù Rules không thấy) |
-| **Thị trường thay đổi cấu trúc** (Regime change) | ❌ Bối rối | ❌ Bối rối | ⚠️ Vẫn hoạt động nhưng thiếu context | ✅ Rules giữ nền (60%), ML re-train với data mới |
-
-### 9.5. Nguyên lý thiết kế: "Không ai hoàn hảo, nhưng kết hợp lại thì gần hoàn hảo"
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                                                                     │
-│   Random Forest     XGBoost         Rule-Based                      │
-│   ┌──────────┐    ┌──────────┐    ┌──────────┐                     │
-│   │ Điểm mù: │    │ Điểm mù: │    │ Điểm mù: │                    │
-│   │ Pattern   │    │ Overfit   │    │ Pattern   │                    │
-│   │ tinh vi   │───▶│           │    │ phức tạp  │                    │
-│   │           │    │ XGB BÙ    │    │           │                    │
-│   └──────────┘    └──────────┘    └──────────┘                     │
-│        │                │               │                           │
-│        │           ┌────┘               │                           │
-│        │           ▼                    │                           │
-│        │    ┌──────────┐               │                           │
-│        │    │ Điểm mù: │               │                           │
-│        └───▶│ Overfit   │◀──────────────┘                           │
-│             │           │                                           │
-│             │ RF BÙ:    │  Rule BÙ:                                 │
-│             │ Trung bình│  60% trọng số                             │
-│             │ 200 cây   │  giữ an toàn                              │
-│             │ giảm      │                                           │
-│             │ variance  │                                           │
-│             └──────────┘                                            │
-│                                                                     │
-│   KẾT QUẢ: Mỗi điểm mù của thuật toán A được B hoặc C bù đắp     │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Tóm lại:** Pipeline không phải là 3 thuật toán chạy riêng rồi cộng lại. Nó là một **hệ thống kiểm tra chéo (cross-validation)** trong đó:
-
-1. **RF** cho baseline ổn định → *"Đa số 200 cây tôi nghĩ là MUA"*
-2. **XGBoost** tinh chỉnh thêm → *"Tôi đồng ý/không đồng ý, vì tôi thấy pattern mà RF không thấy"*
-3. **Ensemble** trung bình 2 ý kiến → *"Khi 2 chuyên gia bất đồng, tôi tự giảm confidence"*
-4. **Rule-Based** kiểm tra lần cuối → *"ML bảo MUA nhưng RSI 90 + Death Cross? Tôi trừ 30 điểm. Không được MUA."*
-5. **Tỷ trọng 60/40** ưu tiên an toàn → *"Trong tài chính, tránh lỗ quan trọng hơn tìm lãi"*
-
-Kết quả: **Không có thuật toán đơn lẻ nào trong 3 thuật toán trên có thể đạt được sự cân bằng giữa nhạy bén (phát hiện cơ hội) và an toàn (tránh bẫy) như khi kết hợp cả 3 trong pipeline.**
-
+- Model cache tự train lại khi dữ liệu mới hơn model quá `MODEL_MAX_AGE_DAYS` ngày; backtest retrain mỗi 20 phiên
+- Dữ liệu 8 năm bao gồm nhiều chu kỳ (2018, 2020, 2021, 2022) thay vì chỉ một giai đoạn
+- Đánh giá lại trên nhiều cửa sổ thời gian thay vì tin một kết quả backtest duy nhất

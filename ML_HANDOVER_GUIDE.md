@@ -31,22 +31,23 @@ flowchart TD
     C --> D[Tạo features quá khứ hiện tại]
     D --> E[Tạo future return và label]
     E --> F[Drop dòng thiếu feature label]
-    F --> G[Time split hoặc walk-forward split]
+    F --> G[Train toàn bộ hoặc walk-forward split]
     G --> H[Train Random Forest]
     G --> I[Train XGBoost]
     H --> J[Predict probability]
     I --> J
-    J --> K[Prior correction và ML score]
+    J --> K[Prior correction, ML score = 50 + 50 x P_BUY - P_SELL]
     D --> L[Rule-based score]
     K --> M[Rule 60% + ML 40%]
     L --> M
     M --> N[Tín hiệu DSS]
-    N --> O[Backtest với phí thuế slippage]
+    N --> O[Backtest blend/rule/ml với phí thuế slippage T+2]
 ```
 
 | Phase | Nội dung | Source chính |
 |---|---|---|
 | 1 | Fetch và cache dữ liệu | `src/data/data_fetcher.py` |
+| 1–4 | Nạp dữ liệu dùng chung cho mọi entrypoint | `src/pipeline.py` |
 | 2 | Clean dữ liệu | `src/data/data_cleaner.py` |
 | 3 | Technical indicators | `src/features/indicators.py` |
 | 4 | Feature engineering và label | `src/features/features.py` |
@@ -64,8 +65,16 @@ Dữ liệu cổ phiếu được lưu tại `data/stocks/<SYMBOL>.csv` với c�
 time, open, high, low, close, volume
 ```
 
-Mặc định hệ thống lấy khoảng 3 năm và tối đa khoảng 750 phiên. Dữ liệu mới được
-append vào cache và khử trùng theo `time`.
+Mặc định hệ thống lấy 8 năm (giới hạn nến ngày của vnstock bản miễn phí).
+Quy tắc cache:
+
+- Mã chưa có CSV hoặc lịch sử ngắn hơn 8 năm: tải full và ghi đè.
+- Mã đã có CSV: tải chồng 10 ngày cuối rồi gộp, trùng `time` thì lấy bản mới.
+- Không lưu nến của hôm nay trước 15:00 giờ Việt Nam (nến chưa chốt).
+- Giá đóng cửa trùng ngày lệch > 0,5% giữa cache và API nghĩa là giá đã được
+  điều chỉnh (cổ tức, chia tách): tải full lại để cả chuỗi cùng cơ sở giá.
+- Mọi lần gọi API giãn cách 7 giây vì gói Guest giới hạn 20 đơn vị quota/phút
+  và mỗi lần tải tốn 2 đơn vị.
 
 ### 3.2. Dữ liệu VNINDEX
 
@@ -184,6 +193,22 @@ dynamic_threshold = max(3%, 1.5 * ATR% / 100) + chi phí vòng đi-về
 
 Cổ phiếu biến động mạnh cần đạt mức lợi nhuận lớn hơn mới được gán BUY hoặc SELL.
 
+### 6.2b. Excess label (vượt VNINDEX)
+
+```text
+excess = future_return − vnindex_future_return   (cùng N phiên)
+excess >= +(3% + chi phí) -> BUY
+excess <= −(3% + chi phí) -> SELL
+còn lại                   -> HOLD
+```
+
+Nhãn này loại phần biến động chung của thị trường, để model học chọn mã tốt
+hơn mặt bằng thay vì đoán hướng thị trường. `vnindex_future_return` nhìn tương
+lai nên chỉ dùng tạo nhãn, không nằm trong feature.
+
+Mọi nhãn nhận tầm nhìn `N` qua `--horizon` (mặc định 5); purge gap của
+walk-forward và backtest dùng cùng `N`.
+
 ### 6.3. Triple barrier label
 
 Mỗi điểm vào có upper barrier, lower barrier và cửa sổ quan sát 5 phiên. Barrier
@@ -197,9 +222,9 @@ Không chọn label chỉ dựa trên Macro F1. Cần xem đồng thời phân p
 BaselineHold, BaselineMomentum, precision BUY/SELL, độ ổn định qua mã/fold và
 backtest sau chi phí.
 
-Trong trạng thái hiện tại, `fixed` là label production vì dễ giải thích và
-Ensemble vượt Momentum baseline tốt hơn về tín hiệu hành động. `volatility` và
-`triple_barrier` là ứng viên nghiên cứu, chưa tự động thay thế production.
+`fixed` là label production vì dễ giải thích. `volatility` và `triple_barrier`
+là ứng viên nghiên cứu, chưa thay thế production. Kết quả so sánh mới nhất nằm
+trong README.
 
 ## 7. Chia dữ liệu theo thời gian
 
@@ -209,10 +234,12 @@ Dữ liệu tài chính là chuỗi thời gian. Random shuffle có thể đưa 
 lai vào train, làm metric cao giả tạo và không phản ánh cách model vận hành thật.
 Mọi split phải giữ thứ tự thời gian.
 
-### 7.2. Production holdout
+### 7.2. Production training
 
-`train_ml_models()` dùng 80% đầu để train và 20% cuối để test theo thứ tự thời
-gian. Không shuffle.
+`train_ml_models()` train model production trên **toàn bộ** dòng có label để
+model dùng cả giai đoạn gần nhất. Khi `verbose=True`, hàm train thêm một model
+phụ trên 80% thời gian đầu (bỏ 5 phiên ở ranh giới) và in metric trên 20% cuối
+để tham khảo; model phụ không được lưu. Không shuffle.
 
 ### 7.3. Walk-forward validation
 
@@ -272,6 +299,7 @@ Cấu hình hiện tại:
     "min_samples_leaf": 20,
     "class_weight": "balanced",
     "random_state": 42,
+    "n_jobs": -1,
 }
 ```
 
@@ -315,13 +343,22 @@ RF và XGBoost trả về `P(SELL), P(HOLD), P(BUY)`. Production lấy trung bì
 
 ```text
 P_ensemble = (P_RF + P_XGB) / 2
-ML score = P(BUY) sau prior correction * 100
+P_corrected(c) ∝ P_ensemble(c) × prior_train(c) / (1/3)
+ML score = 50 + 50 × (P_corrected(BUY) − P_corrected(SELL))
 ```
 
 Do train có class balancing, prior của train được lưu vào model và dùng để hiệu
-chỉnh xác suất trước khi lấy xác suất BUY. Nếu thiếu model hoặc feature hiện tại
-có NaN, ML score mặc định là `50`. Đây là score phục vụ decision, không phải xác
-suất lợi nhuận đã calibration đầy đủ.
+chỉnh xác suất. ML score cùng thang với Rule score: `50` là trung tính. Không
+dùng `P(BUY) × 100` vì BUY chỉ chiếm ~20% nhãn, điểm đó gần như luôn thấp và kéo
+tổng điểm xuống. Nếu thiếu model hoặc feature hiện tại có NaN, ML score là `50`.
+Đây là score phục vụ decision, không phải xác suất lợi nhuận đã calibration đầy đủ.
+
+Model lưu kèm `class_priors_`, `feature_columns_` và `data_end_` (ngày cuối của
+dữ liệu train). `main.py` tự train lại khi model thiếu các thuộc tính này, khác
+feature schema hoặc cũ hơn dữ liệu quá `MODEL_MAX_AGE_DAYS = 7` ngày.
+
+`ML_POOLED = True` (hoặc `--pooled`) train một cặp model chung trên dữ liệu mọi
+mã thay vì mỗi mã một cặp; so sánh hai cách bằng backtest.
 
 ## 11. Rule score và decision
 
@@ -377,15 +414,23 @@ class thường gần mức ngẫu nhiên.
 
 ## 13. Backtest
 
-Backtest nằm ở `src/backtest/backtester.py` và hiện thực:
+Backtest nằm ở `src/backtest/backtester.py`, chạy qua `backtest_runner.py`:
 
-1. Duyệt cửa sổ 6 tháng cuối.
-2. Model chỉ train bằng dữ liệu quá khứ.
-3. Retrain mỗi 20 phiên.
-4. Tín hiệu sinh tại close ngày `i`.
-5. Lệnh khớp tại open ngày `i+1`.
-6. Thoát tại T+5 hoặc khi total score xuống dưới ngưỡng SELL.
-7. Tính phí mua, phí bán, thuế bán và slippage.
+1. `score_history` chấm Rule/ML/Total cho mọi mã, từng phiên trong 12 tháng cuối.
+   Model retrain mỗi 20 phiên, mỗi lần chỉ dùng các dòng có label đã biết
+   (bỏ 6 dòng cuối tính đến ngày retrain).
+2. Với mỗi nguồn điểm `blend` (60/40), `rule`, `ml`:
+   - `simulate_symbol`: mỗi mã giao dịch riêng với toàn bộ vốn.
+   - `simulate_portfolio`: danh mục chung vốn chia 5 slot, mỗi phiên lấp slot
+     trống bằng các mã điểm cao nhất (>= 60).
+   - `rank_ic`: tương quan hạng theo ngày giữa điểm và lợi nhuận T+5 thực tế.
+3. Tín hiệu sinh tại close ngày `i`, lệnh khớp tại open ngày `i+1`.
+4. Thoát tại close khi đủ T+5, hoặc bán tại open khi điểm < 25. Lệnh bán tại
+   open chỉ được phép từ phiên T+3 (cổ phiếu về tài khoản chiều T+2).
+5. Tính phí mua, phí bán, thuế bán và slippage.
+
+So sánh `blend` với `rule` và `ml` cho biết từng thành phần có thêm giá trị hay
+không; `rank_ic` đo khả năng xếp hạng mã, phù hợp với cách dùng bảng khuyến nghị.
 
 Chi phí cấu hình:
 
@@ -399,7 +444,9 @@ Buy & Hold cũng được tính với chi phí để so sánh công bằng hơn.
 
 Metric chính:
 
-- `dss_return`: lợi nhuận cuối kỳ của DSS.
+- `rank_ic`: > 0 nghĩa là mã điểm cao thực sự tăng tốt hơn mã điểm thấp.
+- `portfolio_return`: lợi nhuận danh mục chung vốn.
+- `dss_return`: lợi nhuận cuối kỳ của DSS trên từng mã.
 - `buy_hold_return`: lợi nhuận mua và giữ.
 - `vnindex_return`: biến động VNINDEX.
 - `win_rate`: tỷ lệ lệnh thắng.
@@ -418,8 +465,11 @@ lợi nhuận rất lớn.
 | `label_distribution.csv` | Phân phối label và số dòng trainable |
 | `walk_forward_metrics.csv` | Metric phân loại theo fold và aggregate |
 | `confusion_matrix.csv` | Chi tiết actual/predicted theo class |
-| `backtest_symbols.csv` | Hiệu quả tổng hợp theo mã |
-| `backtest_trades.csv` | Chi tiết từng giao dịch |
+| `backtest_<cấu hình>/backtest_summary.csv` | So sánh blend/rule/ml: rank IC, từng mã, danh mục |
+| `backtest_<cấu hình>/backtest_ic_by_year.csv` | Rank IC và lợi nhuận danh mục theo năm |
+| `backtest_<cấu hình>/backtest_symbols.csv` | Hiệu quả theo mã và nguồn điểm |
+| `backtest_<cấu hình>/backtest_trades.csv` | Chi tiết từng giao dịch (từng mã và danh mục) |
+| `backtest_<cấu hình>/backtest_scores.csv` | Điểm Rule/ML/Total từng phiên dùng cho backtest |
 | `tuning_results.csv` | So sánh candidate hyperparameter |
 
 Chi tiết schema nằm trong [REPORT_METRICS.md](REPORT_METRICS.md).
@@ -440,16 +490,17 @@ Chi tiết schema nằm trong [REPORT_METRICS.md](REPORT_METRICS.md).
 ./run.sh dss --no-fetch --symbols FPT,ACB --retrain
 
 # Test
-python3 -m unittest discover -s tests -v
 ./run.sh test
+./run.sh smoke
 
 # Đánh giá label/model
 ./run.sh evaluate --label-strategy fixed --feature-set baseline
 ./run.sh evaluate --label-strategy volatility --feature-set baseline
 ./run.sh evaluate --label-strategy triple_barrier --feature-set baseline
 
-# Backtest
-./run.sh backtest --months 6 --retrain-every 20
+# Backtest (model từng mã, rồi model chung)
+./run.sh backtest --months 12 --retrain-every 20
+./run.sh backtest --pooled
 ```
 
 ## 16. Khi thay đổi hệ thống
@@ -473,7 +524,7 @@ vì accuracy cao hoặc vì một mã có kết quả nổi bật.
 
 ## 17. Checklist bàn giao
 
-- [ ] `python3 -m unittest discover -s tests -v` đạt.
+- [ ] `./run.sh test` đạt.
 - [ ] `python3 -m compileall -q .` đạt.
 - [ ] `bash -n run.sh` đạt.
 - [ ] Smoke test offline đạt.
@@ -489,8 +540,10 @@ vì accuracy cao hoặc vì một mã có kết quả nổi bật.
 ## 18. Giới hạn hiện tại
 
 Hệ thống chỉ dùng OHLCV và VNINDEX. Chưa có tin tức, sentiment, báo cáo tài
-chính, position sizing theo rủi ro, portfolio backtest nhiều mã cùng lúc,
-probability calibration đầy đủ hoặc kiểm tra regime đủ dài qua nhiều chu kỳ.
+chính, position sizing theo rủi ro hoặc probability calibration đầy đủ.
+Thành phần VN30 theo từng kỳ chỉ có từ 08/2020 (`reference/vn30_changes.csv`)
+và mới được dùng trong backtest `--universe history`; `evaluate` và `main.py`
+vẫn dùng rổ hiện tại. Backtest danh mục chia vốn đều, chưa tính thanh khoản.
 
 Kết quả nên được dùng làm baseline nghiên cứu. Bất kỳ thay đổi nào nhằm cải thiện
 Macro F1 vẫn phải được xác nhận bằng backtest net return, drawdown, turnover và
@@ -501,7 +554,7 @@ Macro F1 vẫn phải được xác nhận bằng backtest net return, drawdown,
 Khi tài liệu khác với code, ưu tiên kiểm tra theo thứ tự:
 
 1. `config.py` cho tham số.
-2. `src/features/features.py` cho label và feature.
+2. `src/pipeline.py` cho thứ tự nạp dữ liệu; `src/features/features.py` cho label và feature.
 3. `src/models/ml_models.py` cho production training/predict.
 4. `src/models/validation.py` cho walk-forward và baseline.
 5. `src/backtest/backtester.py` cho execution và chi phí.

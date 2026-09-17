@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.utils.class_weight import compute_class_weight
-from xgboost import XGBClassifier
 
 import config
 from src.features import FEATURE_COLUMNS
 from src.models.metrics import classification_metrics
-
-CLASS_IDS = np.array([0, 1, 2])
+from src.models.ml_models import fit_models
 
 
 def _baseline_predictions(validation: pd.DataFrame) -> dict[str, np.ndarray]:
@@ -30,27 +26,6 @@ def _baseline_predictions(validation: pd.DataFrame) -> dict[str, np.ndarray]:
     }
 
 
-def _fit_models(
-    x_train: pd.DataFrame,
-    y_train: pd.Series,
-    rf_params: dict,
-    xgb_params: dict,
-) -> tuple:
-    """Fit both models for one temporal fold without writing artifacts."""
-    weights = compute_class_weight(
-        class_weight="balanced",
-        classes=CLASS_IDS,
-        y=y_train,
-    )
-    sample_weight = weights[y_train.to_numpy()]
-
-    rf = RandomForestClassifier(**rf_params)
-    rf.fit(x_train, y_train)
-    xgb = XGBClassifier(**xgb_params)
-    xgb.fit(x_train, y_train, sample_weight=sample_weight)
-    return rf, xgb
-
-
 def walk_forward_validate(
     df: pd.DataFrame,
     initial_fraction: float = 0.5,
@@ -64,6 +39,8 @@ def walk_forward_validate(
 
     ``gap`` purges samples whose forward-looking label overlaps the validation
     window. Returned predictions are out-of-fold and safe for ensemble tests.
+    Đây là chẩn đoán phân loại (argmax); chất lượng điểm DSS dùng thật được đo
+    bằng backtest (so sánh rule/ml/blend, danh mục, rank IC).
     """
     columns = feature_columns or FEATURE_COLUMNS
     usable = df.dropna(subset=columns + ["label"]).copy()
@@ -101,9 +78,7 @@ def walk_forward_validate(
             train_end += validation_size
             continue
 
-        rf_config = config.RF_PARAMS if rf_params is None else rf_params
-        xgb_config = config.XGB_PARAMS if xgb_params is None else xgb_params
-        rf, xgb = _fit_models(train[columns], train["label"], rf_config, xgb_config)
+        rf, xgb = fit_models(train[columns], train["label"], rf_params, xgb_params)
         rf_pred = rf.predict(validation[columns])
         xgb_pred = xgb.predict(validation[columns])
         rf_proba = rf.predict_proba(validation[columns])

@@ -26,11 +26,16 @@ reports/triple_barrier_baseline/
 Chạy backtest:
 
 ```bash
-./run.sh backtest --months 6 --retrain-every 20
+./run.sh backtest --months 12 --retrain-every 20   # model từng mã
+./run.sh backtest --pooled                          # model chung mọi mã
 ```
 
-Lệnh này tạo `backtest_symbols.csv` và `backtest_trades.csv` trực tiếp trong
-`reports/`.
+Lệnh này tạo 5 file trong
+`reports/backtest_<pooled|per_symbol>_<nhãn>_h<N>_<exit>_<universe>_<tháng>m/`:
+`backtest_summary.csv`, `backtest_ic_by_year.csv`, `backtest_symbols.csv`,
+`backtest_trades.csv`, `backtest_scores.csv`.
+
+Walk-forward với tầm nhìn khác 5 phiên ghi vào `reports/<nhãn>_<feature_set>_h<N>/`.
 
 ## 2. Quy ước chung
 
@@ -154,13 +159,59 @@ Khi đánh giá model, nên chú ý các ô:
 - BUY bị dự đoán thành HOLD: bỏ lỡ cơ hội.
 - HOLD bị dự đoán thành BUY/SELL: tạo giao dịch thừa.
 
-## 6. `backtest_symbols.csv`
+## 6. `backtest_summary.csv`
 
-Mỗi dòng là kết quả backtest của một mã trong cửa sổ được chọn.
+Mỗi dòng là một nguồn điểm. Đây là file đọc đầu tiên sau khi backtest.
+
+| Cột | Ý nghĩa |
+|---|---|
+| `mode` | `blend` (Rule 60% + ML 40%), `rule` (chỉ Rule Score), `ml` (chỉ ML Score) |
+| `run` | Tên cấu hình, trùng tên thư mục report |
+| `rank_ic` | Trung bình theo ngày của tương quan hạng (Spearman) giữa điểm và lợi nhuận T+N thực tế giữa các mã thuộc rổ |
+| `rank_ic_positive_years` | Số năm có Rank IC trung bình > 0 trên tổng số năm |
+| `symbol_avg_trade_return` | Lợi nhuận ròng trung bình mỗi lệnh khi giao dịch từng mã |
+| `symbol_avg_return` | Lợi nhuận trung bình khi mỗi mã giao dịch riêng |
+| `symbol_beat_buy_hold` | Số mã có lợi nhuận DSS lớn hơn Buy & Hold của chính mã đó |
+| `symbols` | Số mã được backtest |
+| `symbol_trades`, `symbol_win_rate` | Tổng số lệnh và tỷ lệ thắng khi giao dịch từng mã |
+| `portfolio_return` | Lợi nhuận danh mục chung vốn chia `BACKTEST_PORTFOLIO_SLOTS` phần |
+| `portfolio_trades`, `portfolio_win_rate` | Số lệnh và tỷ lệ thắng của danh mục |
+| `portfolio_avg_trade_return` | Lợi nhuận ròng trung bình mỗi lệnh của danh mục |
+| `portfolio_sharpe`, `portfolio_max_drawdown` | Sharpe và drawdown lớn nhất của danh mục |
+| `portfolio_exposure` | Tỷ lệ vốn trung bình đang nằm trong cổ phiếu |
+| `buy_hold_avg_return` | Buy & Hold trung bình các mã trên cả cửa sổ (không xét mã có thuộc rổ hay không) |
+| `equal_weight_return` | Nắm đều các mã thuộc rổ, tái cân bằng mỗi ngày, không phí — benchmark chính của danh mục |
+| `vnindex_return` | Biến động VNINDEX trong cùng cửa sổ |
+
+Cách đọc:
+
+- `rank_ic` quanh `0` nghĩa là điểm không xếp hạng được mã; `0,02–0,05` ổn định
+  qua thời gian đã là tín hiệu có ích trong thực tế. Lợi nhuận T+5 chồng lấn
+  nhau giữa các ngày nên không coi IC trung bình là kiểm định thống kê.
+- Nếu `blend` không tốt hơn `rule`, phần ML chưa thêm giá trị; nếu `ml` không
+  tốt hơn `rule`, không nên tăng trọng số ML.
+- `portfolio_return` so với `equal_weight_return` và `vnindex_return`.
+
+## 6b. `backtest_ic_by_year.csv`
+
+| Cột | Ý nghĩa |
+|---|---|
+| `mode` | Nguồn điểm |
+| `year` | Năm |
+| `rank_ic` | Rank IC trung bình các ngày trong năm |
+| `portfolio_return` | Lợi nhuận danh mục trong năm (năm đầu/cuối có thể không đủ 12 tháng) |
+
+Một cấu hình chỉ đáng tin khi Rank IC dương ở đa số các năm, không chỉ trung
+bình toàn kỳ dương nhờ một năm đột biến.
+
+## 7. `backtest_symbols.csv`
+
+Mỗi dòng là kết quả backtest của một mã với một nguồn điểm trong cửa sổ được chọn.
 
 | Cột | Ý nghĩa |
 |---|---|
 | `symbol` | Mã cổ phiếu |
+| `mode` | Nguồn điểm: `blend`, `rule` hoặc `ml` |
 | `start`, `end` | Ngày bắt đầu và kết thúc backtest |
 | `num_trades` | Số giao dịch đã đóng |
 | `win_rate` | Tỷ lệ giao dịch có `net_return > 0` |
@@ -188,9 +239,10 @@ Mỗi dòng là kết quả backtest của một mã trong cửa sổ được c
   tốt nếu Buy & Hold tăng mạnh trong cùng giai đoạn.
 
 Chi phí hiện được tính gồm phí mua/bán, thuế bán và slippage. Tín hiệu tính tại
-giá đóng cửa ngày `i`, lệnh được khớp tại giá mở cửa ngày `i+1`.
+giá đóng cửa ngày `i`, lệnh được khớp tại giá mở cửa ngày `i+1`. Lệnh bán tại
+giá mở cửa chỉ được phép từ phiên T+3 (quy tắc thanh toán T+2).
 
-## 7. `backtest_trades.csv`
+## 8. `backtest_trades.csv`
 
 File này có một dòng cho mỗi giao dịch đã đóng.
 
@@ -202,13 +254,23 @@ File này có một dòng cho mỗi giao dịch đã đóng.
 | `exit_price` | Giá thoát lệnh trước chi phí |
 | `hold_days` | Số phiên nắm giữ |
 | `net_return` | Lợi nhuận sau chi phí mua và bán |
-| `exit_reason` | `stop-loss` hoặc `T+5` |
+| `exit_reason` | `stop-loss` (điểm < 25), `T+N` (hết tầm nhìn), `barrier-profit` hoặc `barrier-stop` (với `--exit barrier`) |
 | `symbol` | Mã cổ phiếu |
+| `mode` | Nguồn điểm: `blend`, `rule` hoặc `ml` |
+| `scope` | `symbol` (giao dịch từng mã) hoặc `portfolio` (danh mục chung vốn) |
 
 Nên dùng file này để kiểm tra từng giao dịch bất thường, đặc biệt khi
 `profit_factor` rất cao nhưng số lệnh ít.
 
-## 8. `tuning_results.csv`
+## 9. `backtest_scores.csv`
+
+Mỗi dòng là một mã trong một phiên của cửa sổ backtest: `time`, `symbol`,
+`open`, `high`, `low`, `close`, `in_universe` (mã có thuộc rổ ngày đó không),
+`rule_score`, `ml_score`, `total_score` và `future_return` (lợi nhuận T+N thực tế,
+chỉ dùng để đánh giá). Dùng file này để tự phân tích
+thêm mà không phải chạy lại model.
+
+## 10. `tuning_results.csv`
 
 File này so sánh các cấu hình model trong `src/models/tune.py`.
 
@@ -224,7 +286,7 @@ File này so sánh các cấu hình model trong `src/models/tune.py`.
 Không chọn candidate chỉ vì một fold hoặc một mã có điểm cao. Candidate nên ổn
 định trên nhiều fold, nhiều mã và vẫn phải được kiểm tra lại bằng backtest.
 
-## 9. Nguyên tắc kết luận
+## 11. Nguyên tắc kết luận
 
 Một model hoặc label strategy chỉ nên được xem là ứng viên tốt khi đồng thời:
 

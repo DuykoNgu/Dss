@@ -12,7 +12,10 @@ dat lenh va khong phai cam ket loi nhuan.
 
 > **Trang thai hien tai:** pipeline lay du lieu, lam sach, tao feature, train/
 > nap model, danh gia walk-forward, tao khuyen nghi va backtest giao dich
-> (co phi/thue/slippage) deu da co trong source.
+> (co phi/thue/slippage, T+2, thanh phan VN30 theo tung ky) deu da co trong
+> source. Cau hinh khuyen nghi mac dinh **khong co loi the**; ML voi nhan vuot
+> VNINDEX va tam nhin 20 phien co tin hieu xep hang that nhung chua on dinh de
+> giao dich. Xem [ket qua hien tai](#ket-qua-hien-tai) truoc khi dung tin hieu.
 
 ## Muc luc
 
@@ -47,13 +50,13 @@ Voi moi ma co phieu, DSS:
 |---|---|
 | Thi truong | Co phieu trong ro VN30, co fallback 30 ma mac dinh |
 | Tan suat du lieu | Nen ngay |
-| Lich su mac dinh | 3 nam, toi da 750 dong API moi lan tai |
-| Tam nhin nhan ML | 5 phien giao dich, T+5 |
+| Lich su mac dinh | 8 nam (gioi han nen ngay cua vnstock ban mien phi) |
+| Tam nhin nhan ML | 5 phien (T+5) cho production; evaluate/backtest doi duoc bang `--horizon` |
 | Bai toan ML | Phan loai 3 lop: SELL/HOLD/BUY |
 | Feature production | 19 feature baseline |
-| Mo hinh | Random Forest + XGBoost |
+| Mo hinh | Random Forest + XGBoost, mac dinh moi ma mot cap (`ML_POOLED=False`) |
 | Validation danh gia | Expanding walk-forward, khong shuffle, purge gap 5 phien |
-| Backtest | Walk-forward 6 thang, retrain moi 20 phien, co phi/thue/slippage |
+| Backtest | Walk-forward 12 thang, retrain moi 20 phien, co phi/thue/slippage/T+2; so sanh diem blend/rule/ml, tung ma va danh muc |
 | Ket qua dau ra | Diem Rule, diem ML, tong diem va tin hieu |
 
 ## 2. Cai dat va chay nhanh
@@ -70,8 +73,8 @@ Voi moi ma co phieu, DSS:
 ./run.sh setup
 ```
 
-Lenh nay tao `.venv` trong project, cai dependencies tu `requirements.txt` va
-tao cac thu muc cache can thiet.
+Lenh nay tao `.venv` trong project, cai dependencies (da ghim version) tu
+`requirements.txt` va tao cac thu muc cache can thiet.
 
 ### Quy trinh chay de xuat
 
@@ -82,9 +85,12 @@ tao cac thu muc cache can thiet.
 # 2. Chay khuyen nghi, uu tien model .pkl da co
 ./run.sh dss
 
-# 3. Neu muon train lai model
+# 3. Neu muon ep train lai model (binh thuong model tu train lai khi cu hon du lieu)
 ./run.sh dss --retrain
 ```
+
+Lan fetch dau tien tai 8 nam cho 31 ma, mat khoang 4 phut vi goi Guest cua
+vnstock gioi han 20 don vi quota/phut (moi lan tai ton 2 don vi).
 
 Chay offline voi cache da co:
 
@@ -106,10 +112,14 @@ python main.py --fetch-only
 | `./run.sh fetch` | Lay/cap nhat CSV VN30 va VNINDEX |
 | `./run.sh dss` | Chay pipeline va in bang khuyen nghi |
 | `./run.sh dss --retrain` | Bo qua model cache va train lai |
-| `./run.sh test` | Smoke test offline voi toi da 2 ma |
+| `./run.sh test` | Chay unit test |
+| `./run.sh smoke` | Smoke test pipeline offline voi 2 ma |
 | `./run.sh evaluate --symbols FPT,ACB` | Tao phan bo label, metrics va confusion matrix |
 | `./run.sh tune --symbols FPT,ACB` | So sanh ba cau hinh RF/XGBoost bang walk-forward |
-| `./run.sh backtest` | Backtest walk-forward VN30, so sanh DSS voi Buy & Hold va VNINDEX |
+| `./run.sh backtest` | Backtest walk-forward VN30: blend/rule/ml, tung ma, danh muc, rank IC |
+| `./run.sh backtest --pooled` | Nhu tren nhung dung mot model hoc chung du lieu moi ma |
+| `python main.py --fetch-only --with-history` | Tai them du lieu cac ma tung thuoc VN30 (cho `--universe history`) |
+| `./run.sh evaluate --label-strategy excess --horizon 20` | Walk-forward voi nhan vuot VNINDEX, tam nhin 20 phien |
 | `./run.sh status` | Kiem tra du lieu, model va source |
 | `./run.sh clear-data` | Xoa CSV cache, giu lai model |
 | `./run.sh clean` | Xoa data cache, model va `__pycache__` |
@@ -151,8 +161,8 @@ flowchart TD
     H --> J["Total = Rule x 0.60 + ML x 0.40"]
     I --> J
     J --> K["Signal + reasons"]
-    K --> L["Phase 7: Walk-forward backtest"]
-    L --> M["DSS vs Buy & Hold vs VNINDEX"]
+    E --> L["Phase 7: Walk-forward backtest"]
+    L --> M["blend / rule / ml: tung ma, danh muc, rank IC vs Buy & Hold, VNINDEX"]
 ```
 
 ### Phase 1 - Fetch va cache
@@ -163,9 +173,18 @@ flowchart TD
 - Neu API loi hoac tra ve duoi 20 ma, dung danh sach fallback.
 - Tai co phieu bang `Market().equity(symbol).ohlcv(...)`.
 - Tai VNINDEX bang `Market().index("VNINDEX").ohlcv(...)`.
-- Dung toi da 3 worker dong thoi.
-- Co retry loi mang, retry rieng khi luu va cho khi gap rate limit.
-- Ma chua co CSV duoc tai full; ma da co chi lay nen sau ngay cuoi cung.
+- Moi lan goi API duoc gian cach `SECONDS_PER_CALL=7` giay (chung cho moi
+  luong) de khong vuot quota; vnai goi `sys.exit` khi vuot quota nen loi nay
+  duoc bat lai de cho va thu tiep.
+- Ma chua co CSV hoac lich su ngan hon 8 nam: tai full va ghi de.
+- Ma da co CSV: tai chong `REFRESH_DAYS=10` ngay cuoi roi gop (trung ngay thi
+  lay ban moi), nhu vay nen tung bi luu khi phien chua dong cua se duoc sua.
+- Neu gia dong cua trung ngay giua cache va API lech > 0,5% (gia dieu chinh do
+  co tuc/chia tach), tai full lai de ca chuoi cung mot co so gia.
+- Khong bao gio luu nen cua hom nay truoc 15:00 (gio Viet Nam).
+- vnstock chi duoc import khi thuc su goi API, kem
+  `VNSTOCK_DISABLE_AGENT_SETUP=1` de thu vien khong tu ghi `AGENTS.md` vao
+  project. Chay offline, train, backtest va test khong can vnstock.
 - `symbols.json` luu manifest cac ma da tung duoc dong bo.
 
 ### Phase 2 - Lam sach
@@ -225,13 +244,14 @@ vnindex_volatility_20d, relative_strength_5d
 Tat ca feature chi dung thong tin qua khu/hien tai. `future_return` chi dung
 de tao label va khong duoc dua vao `FEATURE_COLUMNS`.
 
-Ba chien luoc label:
+Bon chien luoc label (tam nhin N mac dinh 5, doi bang `--horizon` o evaluate/backtest):
 
 | Strategy | Quy tac |
 |---|---|
 | `fixed` | BUY neu loi nhuan gross sau 5 phien >= `3% + chi phi vong di-ve`; SELL doi xung; con lai HOLD |
 | `volatility` | Nguong la `max(3%, 1.5 x ATR%) + chi phi vong di-ve` |
-| `triple_barrier` | Xem high/low trong 5 phien voi barrier da cong chi phi; barrier nao cham truoc thi gan BUY/SELL |
+| `excess` | BUY neu loi nhuan sau N phien vuot VNINDEX cung ky it nhat `3% + chi phi vong di-ve`; SELL doi xung |
+| `triple_barrier` | Xem high/low trong N phien voi barrier da cong chi phi; barrier nao cham truoc thi gan BUY/SELL |
 
 Production mac dinh dung `fixed` voi mapping:
 
@@ -245,15 +265,20 @@ Production mac dinh dung `fixed` voi mapping:
 
 - Loai cac dong thieu 19 feature hoac label.
 - Neu duoi `MIN_TRAIN_ROWS=100` dong thi khong train va dung ML score trung
-  tinh `50`.
-- Chia theo thoi gian: 80% dau de train, 20% cuoi de test.
+  tinh `50` (bang ket qua hien `–` o cot ML).
+- Model production train tren **toan bo** dong co label de dung ca giai doan
+  gan nhat. Metric holdout 20% cuoi (co purge 5 phien) chi in ra de tham khao.
 - Khong shuffle.
-- Train mot RF va mot XGBoost cho tung ma.
-- Luu tai `models/<SYMBOL>_rf.pkl` va `models/<SYMBOL>_xgb.pkl`.
-- Lan chay binh thuong uu tien model cache; `--retrain` moi train lai.
+- Mac dinh train mot RF va mot XGBoost cho tung ma; `--pooled` (hoac
+  `ML_POOLED=True`) train mot cap chung cho moi ma.
+- Luu tai `models/<SYMBOL>_rf.pkl`, `models/<SYMBOL>_xgb.pkl` (hoac
+  `models/POOLED_*.pkl`), kem prior cua tap train, feature schema va ngay cuoi
+  cua du lieu.
+- Model cache tu train lai khi thieu metadata, khac feature schema hoac cu hon
+  du lieu qua `MODEL_MAX_AGE_DAYS=7` ngay; `--retrain` ep train lai.
 
 Chi tiet tham so va cach danh gia xem
-[ml_training_walkthrough.md](ml_training_walkthrough.md).
+[ML_HANDOVER_GUIDE.md](ML_HANDOVER_GUIDE.md).
 
 ### Phase 6 - Cham diem va khuyen nghi
 
@@ -278,7 +303,8 @@ Mapping tin hieu:
 | `< 25` | BAN MANH |
 
 Ket qua moi ma gom gia dong cua, Rule Score, ML Score, Total Score, signal va
-toi da hai ly do Rule-based dau tien.
+toi da hai ly do Rule-based dau tien. Dau bang ghi ngay cua nen dung de cham
+diem; ma nao co du lieu cu hon duoc ghi chu rieng.
 
 ## 5. Du lieu va feature
 
@@ -334,7 +360,8 @@ train.
 python main.py --no-fetch --symbols FPT,ACB --retrain
 ```
 
-Day la single chronological holdout 80/20 va luu model vao `models/`.
+Lenh nay train tren toan bo du lieu co label, in metric holdout 20% cuoi de
+tham khao va luu model vao `models/`.
 
 ### Danh gia walk-forward
 
@@ -351,6 +378,9 @@ Quy trinh nay dung expanding window:
 - Bao cao RF, XGB va Ensemble 50/50.
 - Bao cao them `BaselineHold` (luon doan HOLD) va `BaselineMomentum` (dung
   `return_5d` de doan BUY/SELL), cung tren tung fold va aggregate.
+
+Walk-forward do do dung cua nhan (argmax). Diem DSS that su dung (tong diem
+60/40 va nguong 60) duoc do bang backtest ben duoi.
 
 Metric can uu tien:
 
@@ -370,75 +400,163 @@ Doc nhanh chat luong:
 | BUY/SELL Precision | Tren `0,40` va khong doi lai bang recall qua thap | Duoi `0,25`, nhieu tin hieu nham |
 | BUY/SELL Recall | Tren `0,40` ma precision van chap nhan duoc | Duoi `0,20`, bo sot hau het su kien |
 
-Day chi la nguong tham khao, khong phai tieu chuan bao dam loi nhuan. Fixed
-label hien co HOLD khoang `62,2%`, nen Accuracy co the bi danh lua. Xem phan
-[dinh nghia metric va baseline](ml_training_walkthrough.md#81-dinh-nghia-va-cach-danh-gia-totxau)
-de biet cach doc confusion matrix va Expected Value.
+Day chi la nguong tham khao, khong phai tieu chuan bao dam loi nhuan. HOLD
+chiem da so nhan fixed, nen Accuracy co the bi danh lua. Xem
+[REPORT_METRICS.md](REPORT_METRICS.md) de biet cach doc confusion matrix.
 
-Snapshot report `reports/fixed_baseline/` hien co:
+Snapshot walk-forward hien tai (du lieu 8 nam, 29 ma co du dong de tao fold;
+trung binh theo ma cua dong `aggregate`):
 
-| Label | So dong |
-|---|---:|
-| SELL | 2.892 |
-| HOLD | 14.680 |
-| BUY | 3.690 |
-| Tong | 21.262 |
+| Cau hinh | Model | Balanced Acc | Macro F1 | BUY P / R | SELL P / R |
+|---|---|---:|---:|---:|---:|
+| `fixed` + baseline | Ensemble50 | 0,339 | 0,334 | 0,169 / 0,138 | 0,123 / 0,129 |
+| | RF | 0,357 | 0,336 | 0,178 / 0,216 | 0,127 / 0,259 |
+| | BaselineMomentum | 0,356 | 0,282 | 0,190 / 0,432 | 0,126 / 0,356 |
+| `fixed` + extended | Ensemble50 | 0,351 | 0,346 | 0,206 / 0,141 | 0,130 / 0,124 |
+| `volatility` + baseline | Ensemble50 | 0,334 | 0,327 | 0,112 / 0,094 | 0,076 / 0,085 |
+| `triple_barrier` + baseline | Ensemble50 | 0,375 | 0,364 | 0,315 / 0,344 | 0,270 / 0,330 |
+| | RF | 0,407 | 0,392 | 0,335 / 0,280 | 0,289 / 0,313 |
+| | BaselineMomentum | 0,365 | 0,348 | 0,333 / 0,429 | 0,252 / 0,365 |
 
-Tren 29 ma co aggregate walk-forward metrics, trung binh theo ma cua
-Ensemble 50/50 la:
+Phan bo nhan `fixed`: SELL 15,1%, HOLD 66,0%, BUY 19,0% (55.596 dong).
+`BaselineHold` dat accuracy 0,710 nhung balanced accuracy chi 0,333.
 
-| Metric | Gia tri |
-|---|---:|
-| Balanced Accuracy | 0,333 |
-| Macro F1 | 0,318 |
-| BUY Precision | 0,242 |
-| BUY Recall | 0,267 |
-| SELL Precision | 0,218 |
-| SELL Recall | 0,168 |
+Doc nhanh:
 
-Trong snapshot nay, Ensemble co Macro F1 `0,327`, trong khi
-`BaselineMomentum` dat `0,271`. `BaselineHold` co accuracy cao hon do HOLD
-chiem da so, nhung balanced accuracy chi quanh `0,333`; vi vay khong dung
-accuracy don le de chon label hay model.
+- Voi nhan `fixed` (production), Ensemble chi nhinh muc ngau nhien 0,333 va
+  **khong vuot `BaselineMomentum`** ve balanced accuracy; BUY precision ~0,17.
+- `extended` nhinh hon `baseline` mot chut tren moi metric.
+- `triple_barrier` la cau hinh duy nhat ma RF vuot ro ca hai baseline
+  (balanced accuracy 0,407 so voi 0,365). Tuy vay backtest voi luat thoat theo
+  barrier van lo (xem ket qua ben duoi): phan loai dung hon khong dong nghia
+  giao dich co lai sau chi phi.
 
-Day la ket qua phan loai, khong phai loi nhuan giao dich. Xem phan Backtest
-ben duoi de biet ket qua loi nhuan thuc te.
+Day la ket qua phan loai, khong phai loi nhuan giao dich. Xem phan
+[ket qua hien tai](#ket-qua-hien-tai) ben duoi de biet ket qua sau chi phi.
 
 ### Backtest walk-forward
 
 ```bash
-./run.sh backtest
+./run.sh backtest                     # model moi ma, 12 thang, nhan fixed, T+5
+./run.sh backtest --pooled            # model chung moi ma
 ./run.sh backtest --symbols FPT,HPG --months 6
-./run.sh backtest --limit 5 --months 3
+
+# Cac bien the nghien cuu
+./run.sh backtest --pooled --horizon 20 --label-strategy excess
+./run.sh backtest --pooled --label-strategy triple_barrier --exit barrier
+./run.sh backtest --pooled --universe history --months 72 --retrain-every 60
 ```
+
+| Tuy chon | Y nghia |
+|---|---|
+| `--horizon N` | Tam nhin cua nhan va so phien nam giu toi da (mac dinh 5) |
+| `--label-strategy` | Nhan de train model trong backtest: `fixed`, `volatility`, `excess`, `triple_barrier` |
+| `--exit barrier` | Them chot loi/cat lo trong phien khi gia cham `±(3% + 0,6%)` quanh gia vao (cham ca hai thi gia dinh cat lo truoc; chi tu phien T+3) |
+| `--universe history` | Dung thanh phan VN30 theo tung ky thay vi ro hien tai (xem ben duoi) |
 
 Quy trinh trong `src/backtest/backtester.py`:
 
-- Cua so 6 thang cuoi (mac dinh), model chi hoc tu du lieu truoc do.
-- Retrain moi 20 phien tren tap da purge 5 phien (khong dung label cham
-  tuong lai).
-- Tin hieu tai close ngay i, khop lenh tai open ngay i+1.
-- Vao lenh khi Total `>= 60`, thoat khi du T+5 hoac Total `< 25` (cat lo).
-- Tru phi moi gioi `0,15%/chieu`, thue ban `0,1%` va slippage `0,1%/chieu`.
+- Cham diem Rule/ML/Total cho moi ma, tung phien trong 12 thang cuoi (mac
+  dinh). Model retrain moi 20 phien, chi hoc tu dong co label da biet.
+- Tu cung bang diem, so sanh 3 nguon diem: `blend` (Rule 60% + ML 40%),
+  `rule`, `ml`.
+- **Tung ma:** moi ma giao dich rieng voi toan bo von.
+- **Danh muc:** von chung chia 5 slot, moi phien lap slot trong bang cac ma
+  diem cao nhat (>= 60).
+- **Rank IC:** tuong quan hang theo ngay giua diem va loi nhuan T+5 thuc te.
+- Tin hieu tai close ngay i, khop lenh tai open ngay i+1. Vao lenh khi diem
+  `>= 60`, thoat tai close khi du T+5, hoac ban tai open khi diem `< 25` (chi
+  tu phien T+3 vi thanh toan T+2).
+- Tru phi moi gioi `0,15%/chieu`, thue ban `0,1%` va slippage `0,1%/chieu`
+  (tong `0,6%` moi vong mua-ban).
 
-Metric bao cao: so lenh, win rate, profit factor, loi nhuan tung lenh,
-DSS vs Buy & Hold vs VNINDEX, Sharpe va Maximum Drawdown. Ket qua ghi vao
-`reports/backtest_symbols.csv` va `reports/backtest_trades.csv`.
+Ket qua ghi vao
+`reports/backtest_<pooled|per_symbol>_<nhan>_h<N>_<exit>_<universe>_<thang>m/`, gom
+tong hop, Rank IC va loi nhuan danh muc theo tung nam, tung ma, tung lenh va
+bang diem (xem [REPORT_METRICS.md](REPORT_METRICS.md)).
 
-Ket qua tham chieu 6 thang gan nhat (30 ma VN30):
+#### Thanh phan VN30 theo tung ky
 
-| Chi so | Gia tri |
-|---|---:|
-| Loi nhuan TB DSS | -0,55% |
-| Loi nhuan TB Buy & Hold | +7,56% |
-| Loi nhuan TB VNINDEX | +9,25% |
-| Sharpe TB | -0,18 |
-| Max drawdown TB | -7,29% |
-| Tong lenh | 124 |
-| So ma DSS thang Buy & Hold | 8/30 |
+`reference/vn30_changes.csv` ghi ro VN30 ngay 03/08/2020 va moi lan them/loai ma
+den 03/08/2026 (13 ky xet duyet va 1 lan thay the bat thuong DGC → BSR), moi dong
+kem link bai cong bo. Ro goc 2020 duoc suy nguoc tu ro hien tai; unit test kiem
+tra moi ky deu du 30 ma va di xuoi het cac thay doi thi ra dung ro hien tai.
 
-Ket luan: trong giai doan uptrend manh nay, DSS chua vuot Buy & Hold. Dung
-backtest nay lam baseline de do cac cai tien label/feature/model ve sau.
+Voi `--universe history`:
+
+- Chi vao lenh, xep hang (Rank IC) va train model tren cac ma thuoc ro **tai
+  ngay do**; ma da roi ro van duoc giu den khi thoat lenh.
+- Benchmark "nam deu cac ma trong ro" tai can bang moi ngay theo ro cua ngay do.
+- Truoc 03/08/2020 dung ro goc (xap xi).
+- Can tai du lieu cac ma tung thuoc ro: `python main.py --fetch-only --with-history`.
+  ROS (FLC Faros) da huy niem yet, chi con 34 phien nam 2022, nen giai doan
+  08/2020–01/2021 ro chi co 29 ma co du lieu.
+
+Khi HOSE cong bo ky xet duyet moi (thang 1, thang 7) hoac thay the bat thuong,
+them dong vao file nay; test se bao loi neu ro khong con du 30 ma.
+
+### Ket qua hien tai
+
+Nghien cuu chinh: model chung (`--pooled`), thanh phan VN30 theo tung ky
+(`--universe history`), 72 thang (25/08/2020 → 17/09/2026), retrain moi 60
+phien, danh muc 5 slot, da tru phi/thue/slippage. Cung ky: nam deu cac ma trong
+ro **+139,9%**, VNINDEX **+108,5%**.
+
+```bash
+./run.sh backtest --pooled --universe history --months 72 --retrain-every 60 \
+    --label-strategy excess --horizon 20
+```
+
+Danh muc theo nguon diem (Rank IC trung binh; so nam IC > 0 tren 7 nam):
+
+| Nhan | Tam nhin | Thoat | `rule` | `blend` | `ml` |
+|---|---:|---|---:|---:|---:|
+| fixed | 5 | T+N | -69,6% (IC -0,003; 3/7) | -69,0% (+0,001; 5/7) | -59,9% (+0,024; 5/7) |
+| fixed | 10 | T+N | -35,0% (-0,004; 3/7) | -47,3% (+0,004; 5/7) | -26,7% (+0,045; 6/7) |
+| fixed | 20 | T+N | +17,8% (-0,001; 4/7) | +91,8% (+0,019; 6/7) | +79,8% (+0,054; 6/7) |
+| excess | 5 | T+N | -69,6% (-0,003; 3/7) | -62,8% (+0,003; 4/7) | -5,7% (+0,045; 7/7) |
+| excess | 10 | T+N | -35,0% (-0,004; 3/7) | -27,5% (+0,009; 5/7) | +79,1% (+0,058; 7/7) |
+| excess | 20 | T+N | +17,8% (-0,001; 4/7) | +117,5% (+0,028; 6/7) | **+257,9%** (+0,069; 7/7) |
+| triple_barrier | 5 | barrier | -76,6% (-0,003; 3/7) | -74,1% (+0,011; 5/7) | -62,3% (+0,044; 7/7) |
+| triple_barrier | 10 | barrier | -70,7% (-0,004; 3/7) | -52,0% (+0,014; 5/7) | -22,3% (+0,052; 6/7) |
+
+Cot `rule` giong nhau giua `fixed` va `excess` vi diem luat khong phu thuoc nhan.
+Cau hinh tot nhat (`excess`, T+20, `ml`): 260 lenh, ty le thang 57,7%, lai rong
+trung binh +2,86%/lenh, Sharpe 1,03, max drawdown -36,4%, von nam trong co phieu
+68% thoi gian.
+
+**Survivorship bias do duoc:** cung cau hinh `fixed`, T+5, neu dung ro hien tai
+cho moi ngay (`--universe current`) thi "nam deu ro" thanh +256,1% thay vi
++139,9%, va danh muc `ml` lo -26,1% thay vi -59,9%. Ket qua cu dung ro hien tai
+dep hon thuc te rat nhieu.
+
+**Kiem tra thien lech chon cau hinh:** co 27 bien the (9 cau hinh x 3 nguon
+diem), nen cau hinh dung dau de dep hon thuc te. Chon theo Rank IC chi dung
+2020–2023 thi van ra `excess`, T+20, `ml` (IC 0,091). Tren 2024–09/2026:
+
+| | Rank IC | Loi nhuan |
+|---|---:|---:|
+| `excess`, T+20, `ml` | +0,068 | +52,7% |
+| Nam deu cac ma trong ro | | +63,2% |
+| VNINDEX | | +61,1% |
+
+Ket luan:
+
+- **Diem luat khong co kha nang du bao:** Rank IC ~0 o moi cau hinh va chi
+  duong 3–4/7 nam. Tron 60% diem luat vao lam `blend` kem hon `ml` o 7/8 cau hinh.
+- **ML co tin hieu xep hang that nhung yeu:** Rank IC duong o hau het cac nam
+  voi moi nhan, tot nhat voi nhan `excess` va tam nhin dai (IC tang tu 0,045 o
+  T+5 len 0,069 o T+20), va van giu duoc sau khi chon cau hinh tren 2020–2023.
+- **Tam nhin 5 phien lo o moi cau hinh:** chi phi 0,6% moi vong mua-ban an het
+  phan loi cua tin hieu. Tam nhin 20 phien la cau hinh duy nhat co lai.
+- **Barrier exit khong giup:** `triple_barrier` + thoat theo barrier kem hon
+  thoat khi het tam nhin cung tam nhin.
+- **Chua du de giao dich that:** danh muc tot nhat thang "nam deu ro" trong
+  2020, 2021, 2022 va 2025 nhung thua trong 2023, 2024 va 2026; tinh chung
+  2024–09/2026 van thua benchmark, va co drawdown -36%. Tin hieu xep hang on dinh, con luat giao dich (nguong 60, 5 slot,
+  giu 20 phien) chua chuyen no thanh loi nhuan vuot thi truong mot cach on dinh.
+- Cac cau hinh production (`main.py`: nhan `fixed`, T+5, `blend` 60/40, model
+  moi ma) **chua duoc doi**; theo ket qua tren, day la nhom cau hinh kem nhat.
 
 ### Tune
 
@@ -469,7 +587,15 @@ class 2 = BUY
 
 RF va XGBoost cho xac suat tung lop. DSS lay trung binh xac suat cua hai
 model, sau do hieu chinh theo prior that cua tap train vi ca hai model duoc
-train voi class balancing. `ML Score` la xac suat BUY sau hieu chinh nhan 100.
+train voi class balancing. ML Score dua ve cung thang voi Rule Score:
+
+```text
+ML Score = 50 + 50 x (P(BUY) - P(SELL))
+```
+
+`50` la trung tinh, `100` la chac chan BUY, `0` la chac chan SELL. Truoc day
+ML Score la `P(BUY) x 100`; vi BUY chi chiem khoang 20% nhan nen diem nay co
+trung vi khoang 14 va keo tong diem xuong nhu mot la phieu phu quyet.
 
 Neu thieu cap model hoac dong du doan co feature NaN, ML score tra ve 50 de
 Rule-based giu vai tro trung tinh thay vi tu dien mot gia tri tuy y.
@@ -480,13 +606,14 @@ Mot so dieu kien chinh:
 
 | Nhom | Vi du diem cong/tru |
 |---|---|
-| Trend | Gia > SMA50 > SMA200: +10; downtrend: -8; death cross gan day: -10 |
+| Trend | Gia > SMA50 > SMA200: +10; chi gia > SMA50: +5 (khong cong don voi uptrend); downtrend: -8; death cross gan day: -10 |
 | Momentum | RSI hoi phuc: +10; RSI >80: -12; Stochastic cat mua oversold: +8 |
 | Volume | Volume >= 1,5 lan trung binh va gia tang: +10; ban thao: -10 |
 | Volatility | Bat tu dai duoi BB: +8; cham dai tren: -5; ATR cao: -5 |
-| VNINDEX | Tren SMA50: +5; duoi SMA50: -5; giam manh 5 phien: -5 |
+| VNINDEX | Tren SMA50: +5; duoi SMA50: -5 (thieu du lieu VNINDEX thi khong tru); giam manh 5 phien: -5 |
 
-Day la heuristic co dinh, khong phai trong so duoc hoc tu du lieu. Cac con so
+Day la heuristic co dinh, khong phai trong so duoc hoc tu du lieu. Gia tri
+cua no chi duoc do qua backtest nguon diem `rule`. Cac con so
 tren la muc diem cua tung dieu kien trong code; diem thuc te co the cong don va
 duoc clip ve `[0, 100]`.
 
@@ -494,14 +621,18 @@ duoc clip ve `[0, 100]`.
 
 ```text
 DSS/
+├── AGENTS.md          # quy tac cho nguoi/AI sua code
 ├── config.py
 ├── main.py
+├── backtest_runner.py
 ├── run.sh
 ├── requirements.txt
 ├── src/
+│   ├── pipeline.py    # nap CSV -> clean -> indicators -> features, dung chung
 │   ├── data/
 │   │   ├── data_fetcher.py
-│   │   └── data_cleaner.py
+│   │   ├── data_cleaner.py
+│   │   └── universe.py    # doc reference/vn30_changes.csv
 │   ├── features/
 │   │   ├── indicators.py
 │   │   └── features.py
@@ -517,7 +648,9 @@ DSS/
 │   └── backtest/
 │       ├── backtester.py
 │       └── __init__.py
-├── backtest_runner.py
+├── reference/
+│   └── vn30_changes.csv   # thanh phan VN30 theo tung ky, co nguon
+├── tests/      # unit test: ./run.sh test
 ├── data/       # CSV cache, gitignored, tao sau khi fetch
 ├── models/     # file .pkl, gitignored
 └── reports/    # CSV danh gia, gitignored
@@ -529,9 +662,8 @@ DSS/
 |---|---|
 | [ML_HANDOVER_GUIDE.md](ML_HANDOVER_GUIDE.md) | Tai lieu ban giao toan bo quy trinh ML, label, validation, model va backtest |
 | [REPORT_METRICS.md](REPORT_METRICS.md) | Giai thich cac cot trong label, walk-forward, confusion matrix, tuning va backtest report |
-| [ml_training_walkthrough.md](ml_training_walkthrough.md) | Tham so train, label, validation, metrics va ket qua hien tai |
-| [dss_labels_reference.md](dss_labels_reference.md) | Tra cuu label va nguong diem; can doi chieu source neu co mau thuan |
-| [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Giai thich RF, XGBoost, ensemble va han che |
+| [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Ly thuyet cay quyet dinh, RF, XGBoost, ensemble, walk-forward va han che |
+| [AGENTS.md](AGENTS.md) | Lenh, cau truc va quy tac khong duoc pha khi sua code |
 
 Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
 `src/`.
@@ -541,12 +673,18 @@ Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
 - Du lieu phu thuoc API va co the thay doi do dieu chinh lich su, loi mang hoac
   rate limit.
 - VN30 la ro thay doi theo thoi gian; fallback la danh sach tinh.
+- **Survivorship bias:** mac dinh (`--universe current`), train, danh gia va
+  backtest dung ro VN30 hien tai cho ca 8 nam nen ket qua co xu huong dep hon
+  thuc te. `--universe history` sua dieu nay tu 08/2020; truoc do van la xap xi,
+  va `evaluate`, `main.py` van dung ro hien tai.
+- Mot so ma moi niem yet (TCX, VPL) co lich su ngan, gan nhu khong co ML.
 - Nhan `fixed` co the tao mat can bang lop, voi HOLD thuong chiem da so.
 - Ket qua phan loai hien tai con yeu va khong dong deu giua cac ma.
 - Model chi hoc tu OHLCV va VNINDEX, khong co tin tuc, bao cao tai chinh hay
   yeu to vi mo.
-- Backtest 6 thang gan nhat cho thay DSS chua vuot Buy & Hold; ket qua phu
-  thuoc manh vao giai doan thi truong va chua duoc toi uu tham so.
+- Backtest dai nhat chi 6 nam (08/2020–09/2026) va co nhieu bien the duoc thu;
+  ket qua phu thuoc manh vao giai doan thi truong (2020–2021, 2025). Trong so
+  60/40, nguong 60/25 va so slot chua duoc toi uu (co y tranh overfit).
 - Ket qua qua khu khong dam bao ket qua tuong lai.
 
 Day la cong cu nghien cuu va ho tro ra quyet dinh. Nguoi dung tu chiu trach

@@ -1,9 +1,8 @@
-vnstock>=4.0.6
-pandas>=2.0
-numpy>=2.0
-ta
-scikit-learn
-xgboost
-joblib
-tabulate
-colorama
+# Ghim version: model .pkl chỉ nạp an toàn với đúng version scikit-learn/xgboost đã train
+vnstock==4.0.7
+pandas==2.3.3
+numpy==2.2.6
+ta==0.11.0
+scikit-learn==1.9.0
+xgboost==3.4.1
+joblib==1.6.0

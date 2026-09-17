@@ -7,28 +7,11 @@ Ví dụ:
 """
 
 import argparse
-import json
-import os
 import sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
-
-import pandas as pd
-
-from src.data import (
-    clean_index_data,
-    clean_ohlcv_data,
-    fetch_market_index,
-    fetch_vn30_symbols,
-    save_data,
-)
-from src.features import build_features_and_labels, calculate_technical_indicators
+import config
+from src.pipeline import cached_symbols, load_featured, load_market_index, parse_symbols
 from src.scoring import generate_decisions
-
-DATA_DIR = os.path.join(BASE_DIR, "data")
-STOCKS_DIR = os.path.join(DATA_DIR, "stocks")
-INDEX_PATH = os.path.join(DATA_DIR, "index", "VNINDEX.csv")
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,58 +20,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=0, help="Giới hạn số mã (test nhanh)")
     parser.add_argument("--no-fetch", action="store_true", help="Không gọi API, chỉ dùng CSV cache")
     parser.add_argument("--fetch-only", action="store_true", help="Chỉ đồng bộ dữ liệu rồi dừng")
+    parser.add_argument("--with-history", action="store_true",
+                        help="Đồng bộ thêm các mã từng thuộc VN30 (cho backtest --universe history)")
     parser.add_argument("--retrain", action="store_true", help="Train lại model thay vì ưu tiên model cache")
+    parser.add_argument("--pooled", action="store_true", default=config.ML_POOLED,
+                        help="Dùng 1 cặp model học chung dữ liệu mọi mã")
     return parser.parse_args()
 
 
 def get_symbols(args: argparse.Namespace) -> list[str]:
     if args.symbols:
-        symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+        symbols = parse_symbols(args.symbols)
     elif args.no_fetch:
-        cache = os.path.join(DATA_DIR, "symbols.json")
-        if os.path.exists(cache):
-            with open(cache) as f:
-                symbols = json.load(f)
-        else:
-            symbols = sorted(f[:-4] for f in os.listdir(STOCKS_DIR) if f.endswith(".csv"))
+        symbols = cached_symbols()
     else:
+        from src.data import fetch_vn30_symbols
         symbols = fetch_vn30_symbols()
     return symbols[: args.limit] if args.limit > 0 else symbols
 
 
-def sync_data(symbols: list[str], fetch: bool, full_sync: bool) -> None:
-    if fetch:
-        save_data(symbols, fetch_market_index(), full_sync=full_sync)
-
-
-def load_clean_data(symbols: list[str]) -> dict[str, pd.DataFrame]:
-    cleaned = {}
-    for sym in symbols:
-        path = os.path.join(STOCKS_DIR, f"{sym}.csv")
-        if not os.path.exists(path):
-            print(f"Cảnh báo: thiếu cache {sym}, bỏ qua.", file=sys.stderr)
-            continue
-        df = clean_ohlcv_data(pd.read_csv(path))
-        if not df.empty:
-            cleaned[sym] = df
-    return cleaned
-
-
-def load_market_index() -> pd.DataFrame:
-    if not os.path.exists(INDEX_PATH):
-        return pd.DataFrame()
-    return clean_index_data(pd.read_csv(INDEX_PATH))
-
-
-def build_recommendations(featured: dict[str, pd.DataFrame], force_retrain: bool) -> list[dict]:
-    return generate_decisions(featured, force_retrain=force_retrain)
-
-
 def print_report(rows: list[dict]) -> None:
+    latest = max(r["time"] for r in rows)
+    print(f"\nKhuyến nghị theo nến ngày {latest:%Y-%m-%d} (ML '–' = thiếu model/feature, dùng 50)")
     print(f"{'Mã':<6}{'Giá':>10}{'Tổng':>7}{'Rules':>7}{'ML':>7}  Khuyến nghị  Lý do")
     for r in rows:
-        print(f"{r['symbol']:<6}{r['price']:>10.0f}{r['total_score']:>7.1f}"
-              f"{r['rule_score']:>7.1f}{r['ml_score']:>7.1f}  {r['signal']:<10} {r['primary_reason']}")
+        ml = f"{r['ml_score']:>7.1f}" if r["ml_available"] else f"{'–':>7}"
+        stale = f" (dữ liệu đến {r['time']:%Y-%m-%d})" if r["time"] < latest else ""
+        print(f"{r['symbol']:<6}{r['price']:>10.2f}{r['total_score']:>7.1f}"
+              f"{r['rule_score']:>7.1f}{ml}  {r['signal']:<10} {r['primary_reason']}{stale}")
 
 
 def main() -> int:
@@ -98,36 +57,40 @@ def main() -> int:
         print("Không có mã nào để chạy.", file=sys.stderr)
         return 1
 
-    # [1/5] Đồng bộ dữ liệu thô: mã thiếu tải full, mã cũ chỉ lấy nến mới
-    print(f"[1/5] Đồng bộ dữ liệu {len(symbols)} mã...")
-    full_sync = not args.symbols and not args.limit
-    sync_data(symbols, fetch=not args.no_fetch, full_sync=full_sync)
+    # [1/4] Đồng bộ dữ liệu: mã thiếu tải full, mã cũ tải chồng đoạn cuối
+    if not args.no_fetch:
+        from src.data import fetch_market_index, save_data
+        print(f"[1/4] Đồng bộ dữ liệu {len(symbols)} mã...")
+        full_sync = not args.symbols and not args.limit
+        save_data(symbols, fetch_market_index(), full_sync=full_sync)
+        if args.with_history:
+            from src.data import sync_symbols
+            from src.data.universe import load_vn30_changes, vn30_symbols_ever
+            former = sorted(set(vn30_symbols_ever(load_vn30_changes())) - set(symbols))
+            print(f"      Đồng bộ thêm {len(former)} mã từng thuộc VN30: {', '.join(former)}")
+            sync_symbols(former)
     if args.fetch_only:
         print("Xong đồng bộ dữ liệu.")
         return 0
 
-    # [2/5] Làm sạch: chuẩn hóa kiểu, sort time, fill thiếu, gắn cờ cảnh báo
-    print("[2/5] Làm sạch dữ liệu...")
-    cleaned = load_clean_data(symbols)
-    if not cleaned:
+    # [2/4] Làm sạch + chỉ báo + features (nhãn T+5 chỉ dùng để train)
+    print("[2/4] Làm sạch, tính chỉ báo, dựng features...")
+    market = load_market_index()
+    featured = {symbol: load_featured(symbol, market) for symbol in symbols}
+    featured = {symbol: df for symbol, df in featured.items() if not df.empty}
+    skipped = sorted(set(symbols) - set(featured))
+    if skipped:
+        print(f"      Bỏ qua (thiếu cache hoặc quá ít dữ liệu): {', '.join(skipped)}", file=sys.stderr)
+    if not featured:
         print("Không có dữ liệu sạch để xử lý.", file=sys.stderr)
         return 1
-    print(f"      Xong {len(cleaned)}/{len(symbols)} mã.")
+    print(f"      Xong {len(featured)}/{len(symbols)} mã.")
 
-    # [3/5] Chỉ báo kỹ thuật: SMA/EMA/MACD/RSI/Stoch/BB/ATR/OBV (~25 cột)
-    print("[3/5] Tính chỉ báo kỹ thuật...")
-    indicated = {sym: calculate_technical_indicators(df) for sym, df in cleaned.items()}
-
-    # [4/5] Features + nhãn: 19 features tương đối, merge VNINDEX, nhãn T+5
-    print("[4/5] Dựng features...")
-    market = load_market_index()
-    featured = {sym: build_features_and_labels(df, market) for sym, df in indicated.items()}
-    trainable = sum(len(f.dropna()) for f in featured.values())
-    print(f"      Xong, {trainable} dòng trainable trên {len(featured)} mã.")
-
-    # [5/5] Chấm điểm Rule + ML, tổng hợp 60/40 thành tín hiệu
-    print("[5/5] Train ML + chấm điểm + khuyến nghị...")
-    rows = build_recommendations(featured, force_retrain=args.retrain)
+    # [3/4] Model: dùng cache nếu còn mới, cũ hơn dữ liệu thì tự train lại
+    print(f"[3/4] Nạp/train model ({'pooled' if args.pooled else 'mỗi mã'})...")
+    # [4/4] Chấm điểm Rule + ML, tổng hợp 60/40 thành tín hiệu
+    rows = generate_decisions(featured, force_retrain=args.retrain, pooled=args.pooled)
+    print("[4/4] Chấm điểm + khuyến nghị.")
 
     print_report(rows)
     return 0

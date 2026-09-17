@@ -56,7 +56,6 @@ cmd_setup() {
     mkdir -p "$PROJECT_DIR/data/stocks"
     mkdir -p "$PROJECT_DIR/data/index"
     mkdir -p "$PROJECT_DIR/models"
-    mkdir -p "$PROJECT_DIR/notebooks"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Setup hoàn tất!${NC}"
@@ -67,7 +66,7 @@ cmd_fetch() {
     print_header "Tải Dữ Liệu VN30"
     activate_venv
 
-    echo -e "${YELLOW}📡 Đang đồng bộ rổ VN30 (incremental: chỉ lấy nến mới)...${NC}"
+    echo -e "${YELLOW}📡 Đang đồng bộ rổ VN30 (lần đầu ~4 phút do giới hạn quota API)...${NC}"
     python3 "$PROJECT_DIR/main.py" --fetch-only "$@"
 
     echo ""
@@ -94,7 +93,13 @@ cmd_backtest() {
     python3 "$PROJECT_DIR/backtest_runner.py" "$@"
 }
 
-cmd_test_phase() {
+cmd_test() {
+    print_header "Unit Test"
+    activate_venv
+    cd "$PROJECT_DIR" && python3 -m unittest discover -s tests "$@"
+}
+
+cmd_smoke() {
     print_header "Smoke Test Pipeline (offline, 2 mã)"
     activate_venv
     python3 "$PROJECT_DIR/main.py" --no-fetch --limit 2
@@ -103,13 +108,13 @@ cmd_test_phase() {
 cmd_evaluate() {
     print_header "Đánh Giá ML Walk-Forward"
     activate_venv
-    python3 -m src.models.evaluate "$@"
+    cd "$PROJECT_DIR" && python3 -m src.models.evaluate "$@"
 }
 
 cmd_tune() {
     print_header "Tune RF + XGBoost"
     activate_venv
-    python3 -m src.models.tune "$@"
+    cd "$PROJECT_DIR" && python3 -m src.models.tune "$@"
 }
 
 cmd_clear_data() {
@@ -205,7 +210,7 @@ cmd_status() {
 
     echo ""
     echo -e "${BOLD}📝 Source files:${NC}"
-    for f in data/data_fetcher data/data_cleaner features/indicators features/features models/ml_models scoring/scoring scoring/decision backtest/backtester; do
+    for f in pipeline data/data_fetcher data/data_cleaner features/indicators features/features models/ml_models scoring/scoring scoring/decision backtest/backtester; do
         if [ -f "$PROJECT_DIR/src/${f}.py" ]; then
             echo -e "   src/${f}.py   ${GREEN}✅${NC}"
         else
@@ -292,11 +297,12 @@ cmd_help() {
     echo ""
     echo -e "${BOLD}Các lệnh:${NC}"
     echo -e "  ${CYAN}setup${NC}        Tạo venv, cài thư viện, tạo thư mục"
-    echo -e "  ${CYAN}fetch${NC}        Đồng bộ VN30: mã thiếu tải full, mã cũ chỉ lấy nến mới (incremental)"
+    echo -e "  ${CYAN}fetch${NC}        Đồng bộ VN30: mã thiếu tải full, mã cũ tải chồng 10 ngày cuối"
     echo -e "  ${CYAN}dss${NC}          Chạy khuyến nghị hôm nay (main.py)"
-    echo -e "  ${CYAN}dss --retrain${NC} Train lại toàn bộ model thay vì dùng cache"
-    echo -e "  ${CYAN}backtest${NC}     Chạy kiểm chứng lịch sử (backtest_runner.py)"
-    echo -e "  ${CYAN}test${NC}          Smoke test pipeline (offline, 2 mã)"
+    echo -e "  ${CYAN}dss --retrain${NC} Ép train lại model (bình thường tự train lại khi model cũ)"
+    echo -e "  ${CYAN}backtest${NC}     Backtest so sánh blend/rule/ml (thêm --pooled để dùng model chung)"
+    echo -e "  ${CYAN}test${NC}         Chạy unit test"
+    echo -e "  ${CYAN}smoke${NC}        Smoke test pipeline (offline, 2 mã)"
     echo -e "  ${CYAN}evaluate${NC}     Label distribution + metrics + confusion matrix"
     echo -e "  ${CYAN}tune${NC}         So sánh cấu hình RF/XGBoost bằng walk-forward"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
@@ -323,7 +329,8 @@ case "${1:-help}" in
     fetch)    shift; cmd_fetch "$@" ;;
     dss)      shift; cmd_dss "$@" ;;
     backtest) shift; cmd_backtest "$@" ;;
-    test)     shift; cmd_test_phase "$@" ;;
+    test)     shift; cmd_test "$@" ;;
+    smoke)    cmd_smoke ;;
     evaluate) shift; cmd_evaluate "$@" ;;
     tune)     shift; cmd_tune "$@" ;;
     clear-data) cmd_clear_data "$2" ;;

@@ -1,13 +1,13 @@
-"""Chạy walk-forward backtest cho VN30 và in báo cáo tổng hợp.
+"""Walk-forward backtest DSS: so sánh nguồn điểm blend / rule / ml.
 
 Ví dụ:
-    python backtest_runner.py                        # full VN30, 6 tháng
-    python backtest_runner.py --symbols FPT,HPG
-    python backtest_runner.py --limit 5 --months 3
+    python backtest_runner.py                                   # rổ hiện tại, 12 tháng, T+5
+    python backtest_runner.py --pooled --universe history --months 72 --retrain-every 60
+    python backtest_runner.py --label-strategy excess --horizon 20
+    python backtest_runner.py --label-strategy triple_barrier --exit barrier
 """
 
 import argparse
-import json
 import os
 import sys
 
@@ -17,14 +17,18 @@ sys.path.append(BASE_DIR)
 import pandas as pd
 
 import config
-from src.backtest import print_backtest_report, run_symbol_backtest
-from src.data import clean_index_data, clean_ohlcv_data
-from src.features import build_features_and_labels, calculate_technical_indicators
-
-DATA_DIR = os.path.join(BASE_DIR, "data")
-STOCKS_DIR = os.path.join(DATA_DIR, "stocks")
-INDEX_PATH = os.path.join(DATA_DIR, "index", "VNINDEX.csv")
-REPORT_DIR = os.path.join(BASE_DIR, "reports")
+from src.backtest import (
+    DEFAULT_BARRIER,
+    SCORE_MODES,
+    daily_rank_ic,
+    equal_weight_return,
+    index_return,
+    score_history,
+    simulate_portfolio,
+    simulate_symbol,
+)
+from src.data.universe import load_vn30_changes, membership_mask, vn30_symbols_ever
+from src.pipeline import cached_symbols, load_featured, load_market_index, parse_symbols
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,98 +39,141 @@ def parse_args() -> argparse.Namespace:
                         help="Số tháng backtest")
     parser.add_argument("--retrain-every", type=int, default=config.BACKTEST_RETRAIN_DAYS,
                         help="Retrain model mỗi N phiên")
+    parser.add_argument("--slots", type=int, default=config.BACKTEST_PORTFOLIO_SLOTS,
+                        help="Số phần vốn của danh mục")
+    parser.add_argument("--horizon", type=int, default=config.ML_FORWARD_DAYS,
+                        help="Tầm nhìn nhãn và số phiên nắm giữ tối đa")
+    parser.add_argument("--label-strategy", default="fixed",
+                        choices=["fixed", "volatility", "excess", "triple_barrier"],
+                        help="Nhãn dùng để train model trong backtest")
+    parser.add_argument("--exit", default="horizon", choices=["horizon", "barrier"],
+                        help="horizon: bán khi hết tầm nhìn; barrier: thêm chốt lời/cắt lỗ theo barrier")
+    parser.add_argument("--universe", default="current", choices=["current", "history"],
+                        help="current: rổ VN30 hiện tại cho mọi ngày; history: thành phần VN30 theo từng kỳ")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--pooled", dest="pooled", action="store_true", default=config.ML_POOLED,
+                       help="1 cặp model học chung dữ liệu mọi mã")
+    scope.add_argument("--per-symbol", dest="pooled", action="store_false",
+                       help="Mỗi mã 1 cặp model riêng")
     return parser.parse_args()
 
 
-def get_symbols(args: argparse.Namespace) -> list[str]:
+def load_universe(args: argparse.Namespace, index_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Nạp features; với --universe history thêm cột in_universe theo thành phần VN30 từng kỳ."""
+    changes = load_vn30_changes() if args.universe == "history" else None
     if args.symbols:
-        symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
+        symbols = parse_symbols(args.symbols)
+    elif changes is not None:
+        symbols = sorted(set(vn30_symbols_ever(changes)) | set(cached_symbols()))
     else:
-        cache = os.path.join(DATA_DIR, "symbols.json")
-        if os.path.exists(cache):
-            with open(cache) as file:
-                symbols = json.load(file)
-        else:
-            symbols = sorted(name[:-4] for name in os.listdir(STOCKS_DIR) if name.endswith(".csv"))
-    return symbols[: args.limit] if args.limit > 0 else symbols
+        symbols = cached_symbols()
+    symbols = symbols[: args.limit] if args.limit > 0 else symbols
 
-
-def load_market_index() -> pd.DataFrame:
-    if not os.path.exists(INDEX_PATH):
-        return pd.DataFrame()
-    return clean_index_data(pd.read_csv(INDEX_PATH))
-
-
-def build_featured(symbol: str, index_df: pd.DataFrame) -> pd.DataFrame:
-    path = os.path.join(STOCKS_DIR, f"{symbol}.csv")
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    clean = clean_ohlcv_data(pd.read_csv(path))
-    return build_features_and_labels(calculate_technical_indicators(clean), index_df)
-
-
-def summarize(results: list[dict], months: int) -> None:
-    frame = pd.DataFrame([{k: v for k, v in r.items() if k not in ("equity", "trades")}
-                          for r in results])
-    total_trades = int(frame["num_trades"].sum())
-    beat = int((frame["dss_return"] > frame["buy_hold_return"]).sum())
-    vnindex_mean = frame["vnindex_return"].dropna().mean() if frame["vnindex_return"].notna().any() else None
-
-    print(f"\n{'═' * 72}")
-    print(f"📈 TỔNG KẾT ({len(frame)} mã, {months} tháng)")
-    print(f"   Lợi nhuận TB DSS:       {frame['dss_return'].mean():+.2%}")
-    print(f"   Lợi nhuận TB Buy&Hold:  {frame['buy_hold_return'].mean():+.2%}")
-    if vnindex_mean is not None:
-        print(f"   Lợi nhuận TB VNINDEX:   {vnindex_mean:+.2%}")
-    print(f"   Sharpe TB: {frame['sharpe'].mean():.2f} | MDD TB: {frame['max_drawdown'].mean():.2%}")
-    print(f"   Tổng lệnh: {total_trades} | DSS thắng B&H: {beat}/{len(frame)} mã")
-    print(f"{'═' * 72}")
+    featured = {}
+    for symbol in symbols:
+        df = load_featured(symbol, index_df, args.label_strategy, forward_days=args.horizon)
+        if df.empty:
+            print(f"⚠️  {symbol}: thiếu dữ liệu, bỏ qua (chạy python main.py --fetch-only --with-history)")
+            continue
+        if changes is not None:
+            df["in_universe"] = membership_mask(changes, symbol, df["time"])
+        featured[symbol] = df
+    return featured
 
 
 def main() -> int:
     args = parse_args()
-    symbols = get_symbols(args)
     index_df = load_market_index()
     if index_df.empty:
         print("Thiếu data/index/VNINDEX.csv — chạy ./run.sh fetch trước.", file=sys.stderr)
         return 1
 
-    print(f"Backtest {len(symbols)} mã | {args.months} tháng | "
-          f"retrain mỗi {args.retrain_every} phiên | phí {config.BACKTEST_FEE_RATE:.2%}/chiều")
+    model_scope = "pooled" if args.pooled else "per_symbol"
+    barrier = DEFAULT_BARRIER if args.exit == "barrier" else None
+    run_name = (f"backtest_{model_scope}_{args.label_strategy}_h{args.horizon}"
+                f"_{args.exit}_{args.universe}_{args.months}m")
+    print(f"{run_name} | retrain mỗi {args.retrain_every} phiên | danh mục {args.slots} slot")
 
-    results = []
-    for symbol in symbols:
-        featured = build_featured(symbol, index_df)
-        result = run_symbol_backtest(
-            featured,
-            symbol,
-            months=args.months,
-            retrain_every=args.retrain_every,
-            index_df=index_df,
-        )
-        if result is None:
-            print(f"⏭️  {symbol}: không đủ dữ liệu để backtest.")
-            continue
-        print_backtest_report(result)
-        results.append(result)
-
-    if not results:
+    featured = load_universe(args, index_df)
+    scores = score_history(featured, args.months, args.retrain_every, args.pooled, args.horizon)
+    if scores.empty:
         print("Không có mã nào backtest được.", file=sys.stderr)
         return 1
 
-    summarize(results, args.months)
+    benchmark = {
+        "equal_weight_return": equal_weight_return(scores),
+        "vnindex_return": index_return(scores["time"].drop_duplicates(), index_df),
+    }
+    summary_rows, symbol_rows, trade_frames, ic_rows = [], [], [], []
+    for mode, column in SCORE_MODES.items():
+        per_symbol = [
+            result for _, group in scores.groupby("symbol")
+            if (result := simulate_symbol(group, column, index_df, args.horizon, barrier)) is not None
+        ]
+        portfolio = simulate_portfolio(scores, column, args.slots, args.horizon, barrier)
+        frame = pd.DataFrame([{k: v for k, v in r.items() if k != "trades"} for r in per_symbol])
+        closed = pd.concat([r["trades"] for r in per_symbol] + [pd.DataFrame({"net_return": []})])
+        symbol_rows.append(frame.assign(mode=mode))
+        trade_frames += [r["trades"].assign(mode=mode, scope="symbol") for r in per_symbol]
+        trade_frames.append(portfolio["trades"].assign(mode=mode, scope="portfolio"))
 
-    os.makedirs(REPORT_DIR, exist_ok=True)
-    summary_frame = pd.DataFrame([
-        {k: v for k, v in r.items() if k not in ("equity", "trades")} for r in results
-    ])
-    summary_frame.to_csv(os.path.join(REPORT_DIR, "backtest_symbols.csv"), index=False)
-    trades_frame = pd.concat(
-        [r["trades"].assign(symbol=r["symbol"]) for r in results if not r["trades"].empty],
-        ignore_index=True,
-    ) if any(not r["trades"].empty for r in results) else pd.DataFrame()
-    trades_frame.to_csv(os.path.join(REPORT_DIR, "backtest_trades.csv"), index=False)
-    print(f"\n💾 Báo cáo: {REPORT_DIR}/backtest_symbols.csv, backtest_trades.csv")
+        daily_ic = daily_rank_ic(scores, column)
+        yearly_ic = daily_ic.groupby(daily_ic.index.year).mean()
+        year_end = portfolio["equity"].groupby(portfolio["equity"].index.year).last()
+        yearly_return = year_end / year_end.shift(1, fill_value=1.0) - 1
+        ic_rows += [{"mode": mode, "year": year, "rank_ic": ic, "portfolio_return": yearly_return.get(year)}
+                    for year, ic in yearly_ic.items()]
+        summary_rows.append({
+            "mode": mode,
+            "run": run_name,
+            "rank_ic": daily_ic.mean(),
+            "rank_ic_positive_years": f"{int((yearly_ic > 0).sum())}/{len(yearly_ic)}",
+            "symbol_avg_return": frame["dss_return"].mean(),
+            "symbol_beat_buy_hold": int((frame["dss_return"] > frame["buy_hold_return"]).sum()),
+            "symbols": len(frame),
+            "symbol_trades": int(frame["num_trades"].sum()),
+            "symbol_avg_trade_return": closed["net_return"].mean() if len(closed) else 0.0,
+            "portfolio_return": portfolio["portfolio_return"],
+            "portfolio_trades": portfolio["num_trades"],
+            "portfolio_win_rate": portfolio["win_rate"],
+            "portfolio_avg_trade_return": portfolio["avg_return"],
+            "portfolio_sharpe": portfolio["sharpe"],
+            "portfolio_max_drawdown": portfolio["max_drawdown"],
+            "portfolio_exposure": portfolio["exposure"],
+            "buy_hold_avg_return": frame["buy_hold_return"].mean(),
+            **benchmark,
+        })
+
+    summary = pd.DataFrame(summary_rows)
+    ic_table = pd.DataFrame(ic_rows)
+    start, end = scores["time"].min(), scores["time"].max()
+    vnindex = benchmark["vnindex_return"]
+    vnindex_text = f"{vnindex:+.2%}" if vnindex is not None else "N/A"
+    print(f"\n{'═' * 100}")
+    print(f"📈 {start:%Y-%m-%d} → {end:%Y-%m-%d} | Nắm đều các mã trong rổ: "
+          f"{benchmark['equal_weight_return']:+.2%} | VNINDEX: {vnindex_text}")
+    print(f"{'Nguồn':<7}{'Rank IC':>9}{'IC>0 năm':>10}{'Lãi/lệnh':>10}{'Danh mục':>11}"
+          f"{'Lệnh DM':>9}{'Win DM':>8}{'Lãi/lệnh DM':>13}{'Sharpe DM':>11}{'MDD DM':>9}")
+    for row in summary.itertuples():
+        print(f"{row.mode:<7}{row.rank_ic:>+9.3f}{row.rank_ic_positive_years:>10}"
+              f"{row.symbol_avg_trade_return:>+10.2%}{row.portfolio_return:>+11.2%}"
+              f"{row.portfolio_trades:>9}{row.portfolio_win_rate:>8.1%}{row.portfolio_avg_trade_return:>+13.2%}"
+              f"{row.portfolio_sharpe:>11.2f}{row.portfolio_max_drawdown:>9.2%}")
+    if not ic_table.empty:
+        print("\nRank IC theo năm:")
+        print(ic_table.pivot(index="year", columns="mode", values="rank_ic").round(3).to_string())
+    print(f"{'═' * 100}")
+
+    output_dir = os.path.join(config.REPORT_DIR, run_name)
+    os.makedirs(output_dir, exist_ok=True)
+    summary.to_csv(os.path.join(output_dir, "backtest_summary.csv"), index=False)
+    ic_table.to_csv(os.path.join(output_dir, "backtest_ic_by_year.csv"), index=False)
+    pd.concat(symbol_rows, ignore_index=True).to_csv(
+        os.path.join(output_dir, "backtest_symbols.csv"), index=False)
+    pd.concat([t for t in trade_frames if not t.empty] or [pd.DataFrame()], ignore_index=True).to_csv(
+        os.path.join(output_dir, "backtest_trades.csv"), index=False)
+    scores.to_csv(os.path.join(output_dir, "backtest_scores.csv"), index=False)
+    print(f"\n💾 Báo cáo: {output_dir}/")
     return 0
 
 

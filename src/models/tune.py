@@ -3,25 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 
 import pandas as pd
 
 import config
-from src.data import clean_index_data, clean_ohlcv_data
-from src.features import FEATURE_COLUMNS, build_features_and_labels, calculate_technical_indicators
+from src.features import FEATURE_COLUMNS
 from src.models.validation import walk_forward_validate
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-
-
-def load_features(symbol: str) -> pd.DataFrame:
-    index = clean_index_data(pd.read_csv(os.path.join(DATA_DIR, "index", "VNINDEX.csv")))
-    raw = pd.read_csv(os.path.join(DATA_DIR, "stocks", f"{symbol}.csv"))
-    clean = clean_ohlcv_data(raw)
-    return build_features_and_labels(calculate_technical_indicators(clean), index)
+from src.pipeline import load_featured, load_market_index, parse_symbols
 
 
 def candidate_params() -> list[tuple[str, dict, dict]]:
@@ -42,8 +31,8 @@ def candidate_params() -> list[tuple[str, dict, dict]]:
     ]
 
 
-def tune_symbol(symbol: str) -> list[dict]:
-    features = load_features(symbol)
+def tune_symbol(symbol: str, index: pd.DataFrame) -> list[dict]:
+    features = load_featured(symbol, index)
     rows = []
     for name, rf_params, xgb_params in candidate_params():
         result = walk_forward_validate(
@@ -62,10 +51,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tune RF/XGBoost bằng walk-forward.")
     parser.add_argument("--symbols", default="FPT")
     args = parser.parse_args()
+    index = load_market_index()
     rows = []
-    for symbol in [item.strip().upper() for item in args.symbols.split(",") if item.strip()]:
-        rows.extend(tune_symbol(symbol))
-    output = os.path.join(BASE_DIR, "reports", "tuning_results.csv")
+    for symbol in parse_symbols(args.symbols):
+        rows.extend(tune_symbol(symbol, index))
+    output = os.path.join(config.REPORT_DIR, "tuning_results.csv")
     os.makedirs(os.path.dirname(output), exist_ok=True)
     pd.DataFrame(rows).to_csv(output, index=False)
     print(f"Tuning report written to {output}")

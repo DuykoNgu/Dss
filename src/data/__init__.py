@@ -5,6 +5,7 @@ from src.data.data_fetcher import (
     fetch_stock_ohlcv,
     fetch_vn30_symbols,
     save_data,
+    sync_symbols,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "fetch_stock_ohlcv",
     "fetch_vn30_symbols",
     "save_data",
+    "sync_symbols",
 ]
