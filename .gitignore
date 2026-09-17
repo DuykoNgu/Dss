@@ -25,15 +25,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-data/
-models/
-reports/
-
-# Source packages whose directory names overlap with generated artifacts.
-!src/data/
-!src/data/**/*.py
-!src/models/
-!src/models/**/*.py
+/backend/data/
+/backend/models/
+/backend/reports/
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
@@ -225,4 +219,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-/data/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/.vite/

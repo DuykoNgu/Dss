@@ -8,6 +8,8 @@ set -e
 
 # ── Đường dẫn dự án ──
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BACKEND_DIR="$PROJECT_DIR/backend"
+FRONTEND_DIR="$PROJECT_DIR/frontend"
 VENV_DIR="$PROJECT_DIR/.venv"
 
 # ── Màu sắc ──
@@ -50,12 +52,12 @@ cmd_setup() {
 
     echo -e "${YELLOW}📦 Cài thư viện...${NC}"
     pip install --upgrade pip
-    pip install -r "$PROJECT_DIR/requirements.txt"
+    pip install -r "$BACKEND_DIR/requirements.txt"
 
     echo -e "${YELLOW}📁 Tạo thư mục...${NC}"
-    mkdir -p "$PROJECT_DIR/data/stocks"
-    mkdir -p "$PROJECT_DIR/data/index"
-    mkdir -p "$PROJECT_DIR/models"
+    mkdir -p "$BACKEND_DIR/data/stocks"
+    mkdir -p "$BACKEND_DIR/data/index"
+    mkdir -p "$BACKEND_DIR/models"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Setup hoàn tất!${NC}"
@@ -67,54 +69,81 @@ cmd_fetch() {
     activate_venv
 
     echo -e "${YELLOW}📡 Đang đồng bộ rổ VN30 (lần đầu ~4 phút do giới hạn quota API)...${NC}"
-    python3 "$PROJECT_DIR/main.py" --fetch-only "$@"
+    python3 "$BACKEND_DIR/main.py" --fetch-only "$@"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Tải dữ liệu hoàn tất!${NC}"
-    echo -e "   Dữ liệu lưu tại: ${CYAN}$PROJECT_DIR/data/${NC}"
+    echo -e "   Dữ liệu lưu tại: ${CYAN}$BACKEND_DIR/data/${NC}"
 }
 
 cmd_dss() {
     print_header "Chạy Pipeline DSS"
     activate_venv
 
-    python3 "$PROJECT_DIR/main.py" "$@"
+    python3 "$BACKEND_DIR/main.py" "$@"
 }
 
 cmd_backtest() {
     print_header "Kiểm Chứng Lịch Sử (Backtest)"
     activate_venv
 
-    if [ ! -f "$PROJECT_DIR/backtest_runner.py" ]; then
+    if [ ! -f "$BACKEND_DIR/backtest_runner.py" ]; then
         echo -e "${RED}❌ Chưa có file backtest_runner.py. Hãy tham khảo README.md để biết cấu trúc và cách chạy.${NC}"
         exit 1
     fi
 
-    python3 "$PROJECT_DIR/backtest_runner.py" "$@"
+    python3 "$BACKEND_DIR/backtest_runner.py" "$@"
 }
 
 cmd_test() {
     print_header "Unit Test"
     activate_venv
-    cd "$PROJECT_DIR" && python3 -m unittest discover -s tests "$@"
+    cd "$BACKEND_DIR" && python3 -m unittest discover -s tests "$@"
+}
+
+cmd_web() {
+    build_web
+    cd "$BACKEND_DIR" && python3 -m api.server "$@"
+}
+
+build_web() {
+    activate_venv
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "Cần Node.js và npm để build giao diện React."
+        return 1
+    fi
+    if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+        (cd "$FRONTEND_DIR" && npm ci --no-audit --no-fund) || return 1
+    fi
+    (cd "$FRONTEND_DIR" && npm run build) || return 1
+}
+
+cmd_web_balanced() {
+    build_web
+    cd "$BACKEND_DIR" || return 1
+    python3 -m api.server --build-only || return 1
+    python3 -m api.server --producer-only &
+    producer_pid=$!
+    trap 'kill "$producer_pid" 2>/dev/null || true' EXIT INT TERM
+    python3 -m api.server --worker --workers 2 --port 8765
 }
 
 cmd_smoke() {
     print_header "Smoke Test Pipeline (offline, 2 mã)"
     activate_venv
-    python3 "$PROJECT_DIR/main.py" --no-fetch --limit 2
+    python3 "$BACKEND_DIR/main.py" --no-fetch --limit 2
 }
 
 cmd_evaluate() {
     print_header "Đánh Giá ML Walk-Forward"
     activate_venv
-    cd "$PROJECT_DIR" && python3 -m src.models.evaluate "$@"
+    cd "$BACKEND_DIR" && python3 -m src.models.evaluate "$@"
 }
 
 cmd_tune() {
     print_header "Tune RF + XGBoost"
     activate_venv
-    cd "$PROJECT_DIR" && python3 -m src.models.tune "$@"
+    cd "$BACKEND_DIR" && python3 -m src.models.tune "$@"
 }
 
 cmd_clear_data() {
@@ -128,12 +157,12 @@ cmd_clear_data() {
         esac
     done
 
-    STOCK_COUNT=$(ls "$PROJECT_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
-    INDEX_COUNT=$(ls "$PROJECT_DIR/data/index/"*.csv 2>/dev/null | wc -l | tr -d ' ')
+    STOCK_COUNT=$(ls "$BACKEND_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
+    INDEX_COUNT=$(ls "$BACKEND_DIR/data/index/"*.csv 2>/dev/null | wc -l | tr -d ' ')
 
     echo -e "   Stocks CSV: ${CYAN}${STOCK_COUNT} file${NC} trong data/stocks/"
     echo -e "   Index CSV:  ${CYAN}${INDEX_COUNT} file${NC} trong data/index/"
-    if [ -f "$PROJECT_DIR/data/symbols.json" ]; then
+    if [ -f "$BACKEND_DIR/data/symbols.json" ]; then
         echo -e "   symbols.json: ${CYAN}có${NC} (sẽ xóa để fetch quét lại rổ VN30 mới)"
     fi
     echo -e "   Models trong ${CYAN}models/${NC}: ${YELLOW}giữ nguyên${NC} (muốn xóa cả models thì dùng './run.sh clean')"
@@ -149,15 +178,15 @@ cmd_clear_data() {
     fi
 
     echo -e "${YELLOW}🗑️  Xóa data/stocks/*.csv...${NC}"
-    rm -f "$PROJECT_DIR/data/stocks/"*.csv
+    rm -f "$BACKEND_DIR/data/stocks/"*.csv
 
     echo -e "${YELLOW}🗑️  Xóa data/index/*.csv...${NC}"
-    rm -f "$PROJECT_DIR/data/index/"*.csv
+    rm -f "$BACKEND_DIR/data/index/"*.csv
 
     echo -e "${YELLOW}🗑️  Xóa data/symbols.json...${NC}"
-    rm -f "$PROJECT_DIR/data/symbols.json"
+    rm -f "$BACKEND_DIR/data/symbols.json"
 
-    mkdir -p "$PROJECT_DIR/data/stocks" "$PROJECT_DIR/data/index"
+    mkdir -p "$BACKEND_DIR/data/stocks" "$BACKEND_DIR/data/index"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Đã xóa data cũ!${NC}"
@@ -168,12 +197,12 @@ cmd_clean() {
     print_header "Dọn dẹp"
 
     echo -e "${YELLOW}🗑️  Xóa data cache...${NC}"
-    rm -rf "$PROJECT_DIR/data/stocks/"*.csv
-    rm -rf "$PROJECT_DIR/data/index/"*.csv
-    rm -f "$PROJECT_DIR/data/symbols.json"
+    rm -rf "$BACKEND_DIR/data/stocks/"*.csv
+    rm -rf "$BACKEND_DIR/data/index/"*.csv
+    rm -f "$BACKEND_DIR/data/symbols.json"
 
     echo -e "${YELLOW}🗑️  Xóa models đã train...${NC}"
-    rm -rf "$PROJECT_DIR/models/"*.pkl
+    rm -rf "$BACKEND_DIR/models/"*.pkl
 
     echo -e "${YELLOW}🗑️  Xóa __pycache__...${NC}"
     find "$PROJECT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -185,15 +214,15 @@ cmd_status() {
     print_header "Trạng Thái Dự Án"
 
     echo -e "${BOLD}📂 Dữ liệu:${NC}"
-    if [ -d "$PROJECT_DIR/data/stocks" ]; then
-        CSV_COUNT=$(ls "$PROJECT_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
+    if [ -d "$BACKEND_DIR/data/stocks" ]; then
+        CSV_COUNT=$(ls "$BACKEND_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
         echo -e "   Stocks CSV: ${CYAN}${CSV_COUNT} file${NC}"
     else
         echo -e "   Stocks CSV: ${RED}chưa có${NC}"
     fi
 
-    if [ -f "$PROJECT_DIR/data/index/VNINDEX.csv" ]; then
-        INDEX_ROWS=$(wc -l < "$PROJECT_DIR/data/index/VNINDEX.csv" | tr -d ' ')
+    if [ -f "$BACKEND_DIR/data/index/VNINDEX.csv" ]; then
+        INDEX_ROWS=$(wc -l < "$BACKEND_DIR/data/index/VNINDEX.csv" | tr -d ' ')
         echo -e "   VNINDEX:    ${CYAN}${INDEX_ROWS} dòng${NC}"
     else
         echo -e "   VNINDEX:    ${RED}chưa có${NC}"
@@ -201,9 +230,10 @@ cmd_status() {
 
     echo ""
     echo -e "${BOLD}🤖 Models:${NC}"
-    if [ -d "$PROJECT_DIR/models" ]; then
-        PKL_COUNT=$(ls "$PROJECT_DIR/models/"*.pkl 2>/dev/null | wc -l | tr -d ' ')
-        echo -e "   Trained:    ${CYAN}${PKL_COUNT} file .pkl${NC}"
+    if [ -d "$BACKEND_DIR/models" ]; then
+        BUNDLE_COUNT=$(ls "$BACKEND_DIR/models/"*_bundle.pkl 2>/dev/null | wc -l | tr -d ' ')
+        LEGACY_COUNT=$(ls "$BACKEND_DIR/models/"*_rf.pkl "$BACKEND_DIR/models/"*_xgb.pkl 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "   Bundles:    ${CYAN}${BUNDLE_COUNT}${NC} · file cũ: ${YELLOW}${LEGACY_COUNT}${NC}"
     else
         echo -e "   Trained:    ${RED}chưa có${NC}"
     fi
@@ -211,7 +241,7 @@ cmd_status() {
     echo ""
     echo -e "${BOLD}📝 Source files:${NC}"
     for f in pipeline data/data_fetcher data/data_cleaner features/indicators features/features models/ml_models scoring/scoring scoring/decision backtest/backtester; do
-        if [ -f "$PROJECT_DIR/src/${f}.py" ]; then
+        if [ -f "$BACKEND_DIR/src/${f}.py" ]; then
             echo -e "   src/${f}.py   ${GREEN}✅${NC}"
         else
             echo -e "   src/${f}.py   ${RED}❌ chưa tạo${NC}"
@@ -219,7 +249,7 @@ cmd_status() {
     done
 
     for f in main.py backtest_runner.py; do
-        if [ -f "$PROJECT_DIR/$f" ]; then
+        if [ -f "$BACKEND_DIR/$f" ]; then
             echo -e "   ${f}            ${GREEN}✅${NC}"
         else
             echo -e "   ${f}            ${RED}❌ chưa tạo${NC}"
@@ -305,6 +335,8 @@ cmd_help() {
     echo -e "  ${CYAN}smoke${NC}        Smoke test pipeline (offline, 2 mã)"
     echo -e "  ${CYAN}evaluate${NC}     Label distribution + metrics + confusion matrix"
     echo -e "  ${CYAN}tune${NC}         So sánh cấu hình RF/XGBoost bằng walk-forward"
+    echo -e "  ${CYAN}web${NC}          Build React và mở bảng giá VN30 tại localhost:8765"
+    echo -e "  ${CYAN}web-balanced${NC} Build React, chạy producer và 2 ASGI worker tại localhost:8765"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
     echo -e "  ${CYAN}clear-data${NC}   Chỉ xóa data cũ (stocks/index/symbols.json), giữ models"
     echo -e "  ${CYAN}clean${NC}        Xóa cache data, models, __pycache__"
@@ -333,6 +365,8 @@ case "${1:-help}" in
     smoke)    cmd_smoke ;;
     evaluate) shift; cmd_evaluate "$@" ;;
     tune)     shift; cmd_tune "$@" ;;
+    web)      shift; cmd_web "$@" ;;
+    web-balanced) cmd_web_balanced ;;
     clear-data) cmd_clear_data "$2" ;;
     clean)    cmd_clean ;;
     status)   cmd_status ;;

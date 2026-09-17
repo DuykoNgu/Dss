@@ -46,7 +46,9 @@ def generate_decision(symbol: str, latest: pd.Series, parts: dict) -> dict:
 def get_models(key: str, frame: pd.DataFrame, force_retrain: bool = False) -> tuple:
     """Dùng model cache nếu còn mới; thiếu, cũ hoặc có yêu cầu retrain thì train lại."""
     rf, xgb = (None, None) if force_retrain else load_ml_models(key)
-    if rf is None or xgb is None or model_is_stale(rf, frame["time"].max()):
+    if (rf is None or xgb is None or model_is_stale(rf, frame["time"].max())
+            or model_is_stale(xgb, frame["time"].max())
+            or rf.data_end_ != xgb.data_end_):
         rf, xgb = train_ml_models(frame, key)
     return rf, xgb
 

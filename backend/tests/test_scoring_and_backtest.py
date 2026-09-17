@@ -10,7 +10,7 @@ from src.data.data_fetcher import DEFAULT_VN30_SYMBOLS, drop_unclosed_candle, ne
 from src.data.universe import load_vn30_changes, membership_mask, vn30_members
 from src.features.features import _build_labels
 from src.features import FEATURE_COLUMNS
-from src.models.ml_models import model_is_stale, predict_ml_scores
+from src.models.ml_models import DEFAULT_MODEL_SPEC, model_config, model_is_stale, predict_ml_scores
 from src.scoring import calculate_rule_based_score
 
 
@@ -65,7 +65,8 @@ class MlScoreTests(unittest.TestCase):
         model = FakeModel([1 / 3] * 3, {})
         self.assertTrue(model_is_stale(model, pd.Timestamp("2026-09-17")))
 
-        model.feature_columns_ = list(FEATURE_COLUMNS)
+        model.config_ = model_config()
+        model.spec_ = DEFAULT_MODEL_SPEC
         model.data_end_ = pd.Timestamp("2026-09-10")
         self.assertFalse(model_is_stale(model, pd.Timestamp("2026-09-17")))
         self.assertTrue(model_is_stale(model, pd.Timestamp("2026-09-30")))

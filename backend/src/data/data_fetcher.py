@@ -13,6 +13,7 @@ Phase 1: Thu thập OHLCV từ vnstock và cache CSV.
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -145,17 +146,17 @@ def _fetch_ohlcv(name: str, source, start_date: str, end_date: str) -> pd.DataFr
 
 def fetch_stock_ohlcv(symbol: str,
                       start_date: str = config.START_DATE,
-                      end_date: str = config.END_DATE) -> pd.DataFrame:
+                      end_date: str | None = None) -> pd.DataFrame:
     symbol = symbol.strip().upper()
     return _fetch_ohlcv(symbol, lambda: _vnstock().Market().equity(symbol=symbol),
-                        start_date, end_date)
+                        start_date, end_date or datetime.now(VN_TZ).strftime("%Y-%m-%d"))
 
 
 def fetch_market_index(index_code: str = "VNINDEX",
                        start_date: str = config.START_DATE,
-                       end_date: str = config.END_DATE) -> pd.DataFrame:
+                       end_date: str | None = None) -> pd.DataFrame:
     return _fetch_ohlcv(index_code, lambda: _vnstock().Market().index(symbol=index_code),
-                        start_date, end_date)
+                        start_date, end_date or datetime.now(VN_TZ).strftime("%Y-%m-%d"))
 
 
 def merge_and_save(csv_path: str, new_df: pd.DataFrame) -> tuple[int, int]:
@@ -174,8 +175,26 @@ def merge_and_save(csv_path: str, new_df: pd.DataFrame) -> tuple[int, int]:
     combined["time"] = pd.to_datetime(combined["time"])
     combined = combined.drop_duplicates(subset=["time"], keep="last")
     combined = combined.sort_values("time").reset_index(drop=True)
-    combined.to_csv(csv_path, index=False)
+    save_csv_atomic(csv_path, combined)
     return len(combined), len(combined) - old_len
+
+
+def save_csv_atomic(csv_path: str, frame: pd.DataFrame) -> None:
+    """Replace a CSV only after the complete new file is on disk."""
+    directory = os.path.dirname(csv_path)
+    os.makedirs(directory, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=directory, suffix=".tmp",
+                                         delete=False, encoding="utf-8") as output:
+            temporary = output.name
+            frame.to_csv(output, index=False)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, csv_path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _stock_path(sym: str) -> str:
@@ -187,7 +206,7 @@ def fetch_one_symbol(sym: str) -> tuple[str, dict]:
     df = fetch_stock_ohlcv(sym)
     if df.empty:
         return sym, {"rows": 0, "error": "no data"}
-    df.to_csv(_stock_path(sym), index=False)
+    save_csv_atomic(_stock_path(sym), df)
     return sym, {"rows": len(df), "cached": False, "full": True}
 
 
@@ -218,26 +237,19 @@ def update_one_symbol(sym: str) -> tuple[str, dict]:
     return sym, {"rows": total, "cached": False, "added": added}
 
 
-def fetch_latest_quote(symbol: str) -> dict:
-    """Polling nhẹ giá/bảng lệnh hiện tại (1 call), không tải lại lịch sử OHLCV."""
-    symbol = symbol.strip().upper()
+def fetch_latest_quotes(symbols: list[str]) -> dict[str, dict]:
+    """Lấy bảng giá cả rổ bằng một request, không ghi nến trong phiên vào CSV."""
+    if not symbols:
+        return {}
     try:
         _throttle()
-        q = _vnstock().Market().equity(symbol=symbol).quote()
-        if q is None or (hasattr(q, "empty") and q.empty):
+        board = _vnstock().Market().quote(symbol=symbols)
+        if board is None or board.empty:
             return {}
-        row = q.iloc[0].to_dict() if hasattr(q, "iloc") else dict(q)
-        return {
-            "symbol": symbol,
-            "price": row.get("close_price", row.get("price")),
-            "open": row.get("open_price"),
-            "high": row.get("high_price"),
-            "low": row.get("low_price"),
-            "volume": row.get("volume_accumulated", row.get("volume")),
-            "change": row.get("price_change"),
-            "pct_change": row.get("percent_change"),
-        }
-    except Exception:
+        return {str(row["symbol"]).upper(): row.to_dict() for _, row in board.iterrows()
+                if str(row.get("symbol", "")).upper() in symbols}
+    except Exception as error:
+        print(f"Không lấy được bảng giá: {error}", flush=True)
         return {}
 
 

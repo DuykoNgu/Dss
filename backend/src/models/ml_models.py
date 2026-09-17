@@ -2,12 +2,15 @@
 
 import os
 import sys
+import tempfile
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
+import xgboost
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils.class_weight import compute_class_weight
 from xgboost import XGBClassifier
@@ -21,6 +24,20 @@ CLASSES = [0, 1, 2]
 SELL_CLASS, BUY_CLASS = 0, 2
 NEUTRAL_SCORE = 50.0  # ML trung tính, cùng thang với Rule Score; dùng khi thiếu model/feature
 BALANCED_PRIOR = 1.0 / len(CLASSES)
+DEFAULT_MODEL_SPEC = {"label_strategy": "fixed", "horizon": config.ML_FORWARD_DAYS,
+                      "feature_set": "baseline"}
+
+
+def model_config() -> dict:
+    return {
+        "features": list(FEATURE_COLUMNS),
+        "rf": dict(config.RF_PARAMS),
+        "xgb": dict(config.XGB_PARAMS),
+        "profit_threshold": config.ML_PROFIT_THRESHOLD,
+        "label_cost_rate": config.ML_LABEL_COST_RATE,
+        "versions": {"sklearn": sklearn.__version__, "xgboost": xgboost.__version__,
+                     "numpy": np.__version__, "pandas": pd.__version__},
+    }
 
 
 def fit_models(x: pd.DataFrame, y: pd.Series, rf_params: dict | None = None,
@@ -87,41 +104,66 @@ def train_ml_models(
     rf, xgb = fit_models(train_df[FEATURE_COLUMNS], y)
     class_priors = y.value_counts(normalize=True).reindex(CLASSES, fill_value=0.0).to_dict()
     data_end = df["time"].max() if "time" in df.columns else None
+    spec = df.attrs.get("model_spec", DEFAULT_MODEL_SPEC)
     for model in (rf, xgb):
         model.class_priors_ = class_priors
         model.feature_columns_ = list(FEATURE_COLUMNS)
         model.data_end_ = data_end
+        model.spec_ = spec
+        model.config_ = model_config()
 
     if save:
         os.makedirs(config.MODEL_DIR, exist_ok=True)
-        joblib.dump(rf, os.path.join(config.MODEL_DIR, f"{symbol}_rf.pkl"))
-        joblib.dump(xgb, os.path.join(config.MODEL_DIR, f"{symbol}_xgb.pkl"))
+        destination = os.path.join(config.MODEL_DIR, f"{symbol}_bundle.pkl")
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=config.MODEL_DIR, suffix=".tmp", delete=False) as output:
+                temporary = output.name
+            joblib.dump({"rf": rf, "xgb": xgb}, temporary, compress=3)
+            os.replace(temporary, destination)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+        for suffix in ("rf", "xgb"):
+            legacy = os.path.join(config.MODEL_DIR, f"{symbol}_{suffix}.pkl")
+            if os.path.exists(legacy):
+                os.unlink(legacy)
     return rf, xgb
 
 
 def load_ml_models(symbol: str) -> tuple:
     """Nạp cặp model đã train, thiếu thì trả (None, None)."""
-    rf_path = os.path.join(config.MODEL_DIR, f"{symbol}_rf.pkl")
-    xgb_path = os.path.join(config.MODEL_DIR, f"{symbol}_xgb.pkl")
-    if not (os.path.exists(rf_path) and os.path.exists(xgb_path)):
+    path = os.path.join(config.MODEL_DIR, f"{symbol}_bundle.pkl")
+    if not os.path.exists(path):
         return None, None
-    return joblib.load(rf_path), joblib.load(xgb_path)
+    try:
+        bundle = joblib.load(path)
+        return bundle["rf"], bundle["xgb"]
+    except Exception as error:
+        print(f"Không nạp được model {symbol}: {error}", flush=True)
+        return None, None
 
 
-def model_is_stale(model, data_end: pd.Timestamp) -> bool:
+def model_is_stale(model, data_end: pd.Timestamp, spec: dict | None = None) -> bool:
     """Model thiếu metadata, khác feature schema, hoặc cũ hơn dữ liệu quá MODEL_MAX_AGE_DAYS."""
     trained_until = getattr(model, "data_end_", None)
-    if trained_until is None or getattr(model, "feature_columns_", None) != FEATURE_COLUMNS:
+    if (trained_until is None or getattr(model, "config_", None) != model_config()
+            or getattr(model, "spec_", None) != (spec or DEFAULT_MODEL_SPEC)):
         return True
     return data_end - trained_until > pd.Timedelta(days=config.MODEL_MAX_AGE_DAYS)
 
 
-def predict_ml_scores(rows: pd.DataFrame, rf, xgb) -> np.ndarray:
-    """ML Score = 50 + 50 x (P(MUA) - P(BÁN)), xác suất ensemble đã hiệu chỉnh prior.
+def _class_signals(features: pd.DataFrame, rf, xgb) -> np.ndarray:
+    signals = (rf.predict_proba(features) + xgb.predict_proba(features)) / 2.0
+    class_priors = getattr(rf, "class_priors_", None) or getattr(xgb, "class_priors_", None)
+    if class_priors:
+        signals *= np.array([class_priors.get(c, BALANCED_PRIOR) / BALANCED_PRIOR for c in CLASSES])
+        signals /= signals.sum(axis=1, keepdims=True)
+    return signals
 
-    50 là trung tính (cùng thang với Rule Score), 100 = chắc chắn MUA, 0 = chắc chắn BÁN.
-    Thiếu model hoặc dòng có feature NaN -> 50.
-    """
+
+def predict_ml_scores(rows: pd.DataFrame, rf, xgb) -> np.ndarray:
+    """Điểm = 50 + 50 × (tín hiệu lớp vượt chỉ số - lớp kém chỉ số)."""
     scores = np.full(len(rows), NEUTRAL_SCORE)
     if rf is None or xgb is None or rows.empty:
         return scores
@@ -129,15 +171,22 @@ def predict_ml_scores(rows: pd.DataFrame, rf, xgb) -> np.ndarray:
     valid = features.notna().all(axis=1).to_numpy()
     if not valid.any():
         return scores
-
-    proba = (rf.predict_proba(features[valid]) + xgb.predict_proba(features[valid])) / 2.0
-    class_priors = getattr(rf, "class_priors_", None) or getattr(xgb, "class_priors_", None)
-    if class_priors:
-        # Train cân bằng kéo xác suất về 1/3 -> nhân ngược theo prior thật rồi chuẩn hóa
-        proba = proba * np.array([class_priors.get(c, BALANCED_PRIOR) / BALANCED_PRIOR for c in CLASSES])
-        proba = proba / proba.sum(axis=1, keepdims=True)
-    scores[valid] = NEUTRAL_SCORE + 50.0 * (proba[:, BUY_CLASS] - proba[:, SELL_CLASS])
+    signals = _class_signals(features[valid], rf, xgb)
+    scores[valid] = NEUTRAL_SCORE + 50.0 * (signals[:, BUY_CLASS] - signals[:, SELL_CLASS])
     return scores
+
+
+def explain_ml_score(row: pd.DataFrame, rf, xgb) -> dict | None:
+    """Trả các thành phần số học tạo ra điểm của một phiên đã chốt."""
+    if rf is None or xgb is None or row.empty or row[FEATURE_COLUMNS].isna().any(axis=None):
+        return None
+    sell, hold, buy = _class_signals(row[FEATURE_COLUMNS].iloc[[0]], rf, xgb)[0]
+    return {
+        "below": round(float(sell) * 100, 2),
+        "neutral": round(float(hold) * 100, 2),
+        "above": round(float(buy) * 100, 2),
+        "score": round(float(NEUTRAL_SCORE + 50 * (buy - sell)), 1),
+    }
 
 
 def predict_ml_score(row: pd.DataFrame, rf, xgb) -> float:

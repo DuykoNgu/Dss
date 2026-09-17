@@ -1,0 +1,258 @@
+@media (max-width: 1250px) {
+  .board-controls {
+    gap: 7px;
+  }
+  .sort-control {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .research {
+    gap: 20px;
+  }
+  .research-numbers {
+    grid-template-columns: 1fr;
+  }
+  .research-numbers > div {
+    border-right: 0;
+    border-bottom: 1px solid #e4ece3;
+    padding: 10px 15px;
+  }
+  .research-numbers span {
+    min-height: 0;
+  }
+  .research-numbers strong {
+    font-size: 22px;
+    margin: 3px 0;
+  }
+  .research-numbers small {
+    font-size: 9px;
+  }
+}
+@media (max-width: 980px) {
+  .container {
+    width: min(100% - 36px, 900px);
+  }
+  .header-inner {
+    gap: 20px;
+  }
+  .navigation {
+    gap: 16px;
+  }
+  .leaders-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .research {
+    grid-template-columns: 1fr 1fr;
+  }
+  .research-numbers {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .container {
+    width: calc(100% - 30px);
+  }
+  .status-right {
+    display: none;
+  }
+  .header-inner {
+    height: 62px;
+    gap: 10px;
+  }
+  .navigation {
+    margin-left: auto;
+    gap: 0;
+  }
+  .navigation a {
+    font-size: 10px;
+    padding: 0 7px;
+  }
+  .header-ask {
+    font-size: 0;
+    padding: 8px;
+    gap: 0;
+    margin-left: 0;
+  }
+  .header-ask svg:last-child {
+    display: none;
+  }
+  .header-ask svg:first-child {
+    width: 18px;
+    height: 18px;
+  }
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+  .brand-copy b {
+    font-size: 19px;
+  }
+  .brand-copy small {
+    font-size: 7px;
+  }
+  .card-heading {
+    padding: 19px 16px 14px;
+  }
+  .board-controls {
+    padding: 0 16px 13px;
+  }
+  .board-search {
+    min-width: 100%;
+    flex: auto;
+  }
+  .filter-group {
+    flex: 1;
+  }
+  .sort-control {
+    width: auto;
+  }
+  .table-scroll {
+    max-height: 480px;
+  }
+  .market-card table {
+    min-width: 930px;
+  }
+  .market-card th:first-child,
+  .market-card td:first-child {
+    padding-left: 14px;
+  }
+  .board-bottom {
+    padding: 12px 16px;
+  }
+  .board-bottom span:last-child {
+    display: none;
+  }
+  .section-title {
+    display: block;
+  }
+  .section-title > button {
+    margin-top: 14px;
+  }
+  .leaders-grid {
+    gap: 8px;
+  }
+  .leader-card {
+    padding: 13px;
+    min-height: 134px;
+  }
+  .leader-main {
+    margin-top: 16px;
+  }
+  .leader-main strong {
+    font-size: 23px;
+  }
+  .leader-main > span {
+    font-size: 19px;
+  }
+  .leader-foot {
+    display: block;
+  }
+  .leader-foot .change {
+    margin-top: 3px;
+  }
+  .research {
+    display: block;
+    padding: 25px 19px;
+    margin-top: 30px;
+    margin-bottom: 28px;
+  }
+  .research-numbers {
+    margin-top: 20px;
+  }
+  .footer .container {
+    display: block;
+    padding: 18px 0;
+  }
+  .footer .container > span {
+    display: block;
+    margin-top: 6px;
+  }
+  .footer a {
+    margin-top: 10px;
+  }
+  .chat-panel {
+    left: 10px;
+    right: 10px;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    width: auto;
+    height: min(660px, calc(100dvh - 105px));
+    max-width: none;
+  }
+  .chat-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 28;
+    inset: 0;
+    background: rgba(9, 35, 30, 0.35);
+  }
+  .chat-launcher {
+    right: 14px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 430px) {
+  .navigation a {
+    padding: 0 5px;
+  }
+  .navigation a:last-child {
+    display: none;
+  }
+  .brand-copy small {
+    letter-spacing: 0.1em;
+  }
+  .filter-group > svg {
+    display: none;
+  }
+  .filter-group button {
+    padding: 5px 6px;
+  }
+  .sort-control {
+    font-size: 0;
+  }
+  .sort-control select {
+    max-width: 124px;
+  }
+  .leaders-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .leader-card {
+    padding: 10px;
+  }
+  .leader-rank {
+    font-size: 10px;
+  }
+  .leader-rank span {
+    font-size: 8px;
+  }
+  .leader-main {
+    display: block;
+  }
+  .leader-main > span {
+    display: block;
+    margin-top: 4px;
+  }
+  .leader-foot {
+    font-size: 9px;
+  }
+  .chat-launcher {
+    padding: 7px;
+  }
+  .launcher-label {
+    display: none;
+  }
+  .launcher-icon {
+    width: 37px;
+    height: 37px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .leader-card {
+    transition: none;
+  }
+  .typing i {
+    animation: none;
+  }
+}

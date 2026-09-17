@@ -4,7 +4,7 @@ Tài liệu giải thích **lý thuyết** và **cách dùng** từng thuật to
 
 > Đây là tài liệu lý thuyết, không phải bằng chứng hiệu quả. Kết quả đo thực tế
 > (walk-forward, backtest so sánh blend/rule/ml, rank IC) nằm trong `README.md`.
-> Khi tài liệu khác code, tin `config.py` và `src/`.
+> Khi tài liệu khác code, tin `backend/config.py` và `backend/src/`.
 
 ---
 
@@ -322,7 +322,7 @@ XGBClassifier(
 | `n_estimators=300` | 300 vòng | Boosting cần nhiều vòng hơn Bagging vì mỗi cây nhỏ và yếu. 300 vòng × learning_rate 0.05 = vừa đủ để hội tụ. |
 | `max_depth=6` | 6 tầng | **Nhỏ hơn RF (10)** vì trong Boosting, mỗi cây nên là "weak learner" (cây yếu). Cây quá sâu + Boosting = overfit rất nhanh. |
 | `learning_rate=0.05` | 0.05 | **Tốc độ học chậm** — Mỗi cây mới chỉ sửa 5% lỗi của cây trước. Chậm nhưng ổn định hơn. Nếu đặt 0.3 (mặc định), model sẽ hội tụ nhanh nhưng dễ bị "lao qua" điểm tối ưu. |
-| `subsample=0.8` | 80% data/cây | Mỗi cây chỉ dùng 80% dữ liệu → tạo sự đa dạng, giảm overfitting (tương tự Bagging nhưng nhẹ hơn). |
+| `subsample=0.8` | 80% backend/data/cây | Mỗi cây chỉ dùng 80% dữ liệu → tạo sự đa dạng, giảm overfitting (tương tự Bagging nhưng nhẹ hơn). |
 | `colsample_bytree=0.8` | 80% features/cây | Mỗi cây chỉ dùng 80% features → buộc model khám phá nhiều tổ hợp features khác nhau. |
 | `eval_metric='mlogloss'` | Multi-class Log Loss | Hàm mất mát chuẩn cho bài toán phân loại 3 lớp. Phạt nặng khi model tự tin sai (ví dụ: đoán MUA 90% nhưng thực tế là BÁN). |
 
@@ -415,8 +415,8 @@ Trường hợp **bất đồng** là lúc Ensemble phát huy giá trị nhất:
 
 ### 5.2. Cách thực hiện trong DSS
 
-- `src/models/validation.py`: walk-forward như trên, báo cáo RF/XGB/Ensemble và 2 baseline.
-- `src/backtest/backtester.py`: retrain mỗi 20 phiên, mỗi lần chỉ dùng dữ liệu có nhãn đã biết.
+- `backend/src/models/validation.py`: walk-forward như trên, báo cáo RF/XGB/Ensemble và 2 baseline.
+- `backend/src/backtest/backtester.py`: retrain mỗi 20 phiên, mỗi lần chỉ dùng dữ liệu có nhãn đã biết.
 - Model production (`train_ml_models`) train trên **toàn bộ** dữ liệu có nhãn để dùng cả
   giai đoạn gần nhất; metric holdout 20% cuối chỉ in ra để tham khảo.
 

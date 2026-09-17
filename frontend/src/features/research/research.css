@@ -1,0 +1,86 @@
+.research {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 40px;
+  align-items: center;
+  margin-top: 44px;
+  margin-bottom: 55px;
+  border-radius: 13px;
+  background: #eaf1e9;
+  border: 1px solid #d8e4d7;
+  padding: 31px 36px;
+  scroll-margin-top: 24px;
+}
+.research h2 {
+  font:
+    500 clamp(28px, 2.4vw, 37px)/1.12 Georgia,
+    serif;
+  letter-spacing: -0.045em;
+  margin: 12px 0;
+}
+.research h2 em {
+  color: #2c8266;
+}
+.research-copy > p {
+  color: #5f7668;
+  font-size: 12px;
+  line-height: 1.65;
+  max-width: 570px;
+  margin: 0;
+}
+.research-note {
+  display: flex;
+  align-items: start;
+  gap: 9px;
+  color: #3f705c;
+  font-size: 11px;
+  margin-top: 22px;
+  max-width: 590px;
+}
+.research-note svg {
+  flex: none;
+}
+.research-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: white;
+  border: 1px solid #d5e4d5;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.research-numbers > div {
+  padding: 17px 16px;
+  border-right: 1px solid #e4ece3;
+}
+.research-numbers > div:last-child {
+  border: 0;
+}
+.research-numbers span {
+  display: block;
+  color: #869b8e;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.055em;
+  min-height: 27px;
+}
+.research-numbers strong {
+  display: block;
+  font-size: 25px;
+  letter-spacing: -0.06em;
+  color: #1e745d;
+  margin: 8px 0 4px;
+  white-space: nowrap;
+}
+.research-numbers strong.risk-number {
+  color: #b55c53;
+}
+.research-numbers small {
+  color: #819387;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.research-numbers > p {
+  padding: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}

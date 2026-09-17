@@ -1,0 +1,216 @@
+.profit-loss {
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid #dce9e2;
+  scroll-margin-top: 16px;
+}
+
+.profit-loss-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.profit-loss-heading h3 {
+  margin: 8px 0 0;
+  color: #203d34;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.profit-loss-heading p,
+.profit-loss-empty {
+  margin: 0;
+  color: #81958b;
+  font-size: 13px;
+}
+
+.profit-loss-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #dceadf;
+  border-radius: 12px;
+  background: #f7fbf8;
+}
+
+.profit-loss-form label {
+  display: grid;
+  gap: 7px;
+  color: #688075;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profit-loss-form input,
+.profit-loss-form select {
+  min-width: 0;
+  width: 100%;
+  height: 42px;
+  padding: 0 11px;
+  border: 1px solid #ccdfd2;
+  border-radius: 8px;
+  background: #fff;
+  color: #213b33;
+  font: inherit;
+  font-size: 14px;
+}
+
+.profit-loss-form button {
+  height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #187a61;
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.profit-loss-form button:hover {
+  background: #106a53;
+}
+
+.profit-loss-form button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.profit-loss-error {
+  margin: 12px 0 0;
+  color: #b44e48;
+  font-size: 13px;
+}
+
+.profit-loss-results {
+  margin-top: 18px;
+}
+
+.profit-loss-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.profit-loss-summary > div {
+  padding: 16px;
+  border: 1px solid #dceadf;
+  border-radius: 10px;
+}
+
+.profit-loss-summary span,
+.profit-loss-summary small {
+  display: block;
+  color: #789085;
+  font-size: 11px;
+}
+
+.profit-loss-summary span {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.profit-loss-summary strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: clamp(18px, 2vw, 27px);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.profit-loss-costs {
+  margin: 14px 0;
+  color: #637c6f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.profit-loss-table-wrap {
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid #dceadf;
+  border-radius: 10px;
+}
+
+.profit-loss-table {
+  width: 100%;
+  min-width: 600px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.profit-loss-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 11px 15px;
+  background: #eef6f0;
+  color: #5d7569;
+  text-align: right;
+  font-size: 11px;
+}
+
+.profit-loss-table th:first-child,
+.profit-loss-table td:first-child {
+  text-align: left;
+}
+
+.profit-loss-table td {
+  padding: 12px 15px;
+  border-top: 1px solid #edf2ed;
+  text-align: right;
+}
+
+.profit-loss-table td small {
+  display: block;
+  margin-top: 3px;
+  color: #82968c;
+}
+
+.profit-loss-method {
+  margin-top: 14px;
+  color: #62796c;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.profit-loss-method summary {
+  width: fit-content;
+  color: #20735b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.profit-loss-method p {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 900px) {
+  .profit-loss-heading {
+    display: block;
+  }
+
+  .profit-loss-heading p {
+    margin-top: 8px;
+  }
+
+  .profit-loss-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .profit-loss-form,
+  .profit-loss-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .profit-loss-summary strong {
+    font-size: 24px;
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=DSS VN30 API and quote producer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dss
+WorkingDirectory=/srv/dss/backend
+ExecStart=/srv/dss/.venv/bin/python -m api.server --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

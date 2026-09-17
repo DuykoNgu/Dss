@@ -1,7 +1,7 @@
 # Hướng dẫn đọc các file report của DSS
 
 Tài liệu này mô tả các CSV được tạo bởi pipeline đánh giá ML và backtest. Các
-file trong `reports/` là artifact sinh ra ở máy local và có thể thay đổi khi dữ
+file trong `backend/reports/` là artifact sinh ra ở máy local và có thể thay đổi khi dữ
 liệu, label hoặc cấu hình model thay đổi.
 
 ## 1. Tạo report
@@ -18,9 +18,9 @@ liệu, label hoặc cấu hình model thay đổi.
 Các thư mục label chính là:
 
 ```text
-reports/fixed_baseline/
-reports/volatility_baseline/
-reports/triple_barrier_baseline/
+backend/reports/fixed_baseline/
+backend/reports/volatility_baseline/
+backend/reports/triple_barrier_baseline/
 ```
 
 Chạy backtest:
@@ -31,11 +31,11 @@ Chạy backtest:
 ```
 
 Lệnh này tạo 5 file trong
-`reports/backtest_<pooled|per_symbol>_<nhãn>_h<N>_<exit>_<universe>_<tháng>m/`:
+`backend/reports/backtest_<pooled|per_symbol>_<nhãn>_h<N>_<exit>_<universe>_<tháng>m/`:
 `backtest_summary.csv`, `backtest_ic_by_year.csv`, `backtest_symbols.csv`,
 `backtest_trades.csv`, `backtest_scores.csv`.
 
-Walk-forward với tầm nhìn khác 5 phiên ghi vào `reports/<nhãn>_<feature_set>_h<N>/`.
+Walk-forward với tầm nhìn khác 5 phiên ghi vào `backend/reports/<nhãn>_<feature_set>_h<N>/`.
 
 ## 2. Quy ước chung
 
@@ -272,7 +272,7 @@ thêm mà không phải chạy lại model.
 
 ## 10. `tuning_results.csv`
 
-File này so sánh các cấu hình model trong `src/models/tune.py`.
+File này so sánh các cấu hình model trong `backend/src/models/tune.py`.
 
 | Cột | Ý nghĩa |
 |---|---|

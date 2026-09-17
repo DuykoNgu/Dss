@@ -46,20 +46,20 @@ flowchart TD
 
 | Phase | Nội dung | Source chính |
 |---|---|---|
-| 1 | Fetch và cache dữ liệu | `src/data/data_fetcher.py` |
-| 1–4 | Nạp dữ liệu dùng chung cho mọi entrypoint | `src/pipeline.py` |
-| 2 | Clean dữ liệu | `src/data/data_cleaner.py` |
-| 3 | Technical indicators | `src/features/indicators.py` |
-| 4 | Feature engineering và label | `src/features/features.py` |
-| 5 | Train và validation ML | `src/models/` |
-| 6 | Rule score và ensemble decision | `src/scoring/` |
-| 7 | Backtest | `src/backtest/backtester.py` |
+| 1 | Fetch và cache dữ liệu | `backend/src/data/data_fetcher.py` |
+| 1–4 | Nạp dữ liệu dùng chung cho mọi entrypoint | `backend/src/pipeline.py` |
+| 2 | Clean dữ liệu | `backend/src/data/data_cleaner.py` |
+| 3 | Technical indicators | `backend/src/features/indicators.py` |
+| 4 | Feature engineering và label | `backend/src/features/features.py` |
+| 5 | Train và validation ML | `backend/src/models/` |
+| 6 | Rule score và ensemble decision | `backend/src/scoring/` |
+| 7 | Backtest | `backend/src/backtest/backtester.py` |
 
 ## 3. Dữ liệu đầu vào
 
 ### 3.1. Dữ liệu cổ phiếu
 
-Dữ liệu cổ phiếu được lưu tại `data/stocks/<SYMBOL>.csv` với các cột bắt buộc:
+Dữ liệu cổ phiếu được lưu tại `backend/data/stocks/<SYMBOL>.csv` với các cột bắt buộc:
 
 ```text
 time, open, high, low, close, volume
@@ -78,7 +78,7 @@ Quy tắc cache:
 
 ### 3.2. Dữ liệu VNINDEX
 
-File `data/index/VNINDEX.csv` được chuẩn hóa thành:
+File `backend/data/index/VNINDEX.csv` được chuẩn hóa thành:
 
 ```text
 time, indexValue
@@ -354,7 +354,7 @@ tổng điểm xuống. Nếu thiếu model hoặc feature hiện tại có NaN,
 Đây là score phục vụ decision, không phải xác suất lợi nhuận đã calibration đầy đủ.
 
 Model lưu kèm `class_priors_`, `feature_columns_` và `data_end_` (ngày cuối của
-dữ liệu train). `main.py` tự train lại khi model thiếu các thuộc tính này, khác
+dữ liệu train). `backend/main.py` tự train lại khi model thiếu các thuộc tính này, khác
 feature schema hoặc cũ hơn dữ liệu quá `MODEL_MAX_AGE_DAYS = 7` ngày.
 
 `ML_POOLED = True` (hoặc `--pooled`) train một cặp model chung trên dữ liệu mọi
@@ -414,7 +414,7 @@ class thường gần mức ngẫu nhiên.
 
 ## 13. Backtest
 
-Backtest nằm ở `src/backtest/backtester.py`, chạy qua `backtest_runner.py`:
+Backtest nằm ở `backend/src/backtest/backtester.py`, chạy qua `backend/backtest_runner.py`:
 
 1. `score_history` chấm Rule/ML/Total cho mọi mã, từng phiên trong 12 tháng cuối.
    Model retrain mỗi 20 phiên, mỗi lần chỉ dùng các dòng có label đã biết
@@ -525,7 +525,7 @@ vì accuracy cao hoặc vì một mã có kết quả nổi bật.
 ## 17. Checklist bàn giao
 
 - [ ] `./run.sh test` đạt.
-- [ ] `python3 -m compileall -q .` đạt.
+- [ ] `python3 -m compileall -q backend` đạt.
 - [ ] `bash -n run.sh` đạt.
 - [ ] Smoke test offline đạt.
 - [ ] Dữ liệu đúng thời gian và không trùng phiên.
@@ -541,8 +541,8 @@ vì accuracy cao hoặc vì một mã có kết quả nổi bật.
 
 Hệ thống chỉ dùng OHLCV và VNINDEX. Chưa có tin tức, sentiment, báo cáo tài
 chính, position sizing theo rủi ro hoặc probability calibration đầy đủ.
-Thành phần VN30 theo từng kỳ chỉ có từ 08/2020 (`reference/vn30_changes.csv`)
-và mới được dùng trong backtest `--universe history`; `evaluate` và `main.py`
+Thành phần VN30 theo từng kỳ chỉ có từ 08/2020 (`backend/reference/vn30_changes.csv`)
+và mới được dùng trong backtest `--universe history`; `evaluate` và `backend/main.py`
 vẫn dùng rổ hiện tại. Backtest danh mục chia vốn đều, chưa tính thanh khoản.
 
 Kết quả nên được dùng làm baseline nghiên cứu. Bất kỳ thay đổi nào nhằm cải thiện
@@ -553,11 +553,11 @@ Macro F1 vẫn phải được xác nhận bằng backtest net return, drawdown,
 
 Khi tài liệu khác với code, ưu tiên kiểm tra theo thứ tự:
 
-1. `config.py` cho tham số.
-2. `src/pipeline.py` cho thứ tự nạp dữ liệu; `src/features/features.py` cho label và feature.
-3. `src/models/ml_models.py` cho production training/predict.
-4. `src/models/validation.py` cho walk-forward và baseline.
-5. `src/backtest/backtester.py` cho execution và chi phí.
+1. `backend/config.py` cho tham số.
+2. `backend/src/pipeline.py` cho thứ tự nạp dữ liệu; `backend/src/features/features.py` cho label và feature.
+3. `backend/src/models/ml_models.py` cho production training/predict.
+4. `backend/src/models/validation.py` cho walk-forward và baseline.
+5. `backend/src/backtest/backtester.py` cho execution và chi phí.
 6. `REPORT_METRICS.md` cho schema report.
 
 Các file report chỉ là snapshot của một lần chạy, không phải nguồn định nghĩa

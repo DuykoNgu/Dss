@@ -1,0 +1,122 @@
+.discovery {
+  margin-top: 40px;
+  scroll-margin-top: 24px;
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+}
+.section-title h2 {
+  font:
+    500 clamp(28px, 2.4vw, 36px)/1.14 Georgia,
+    serif;
+  letter-spacing: -0.04em;
+  margin: 9px 0 5px;
+}
+.section-title p {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 670px;
+  margin: 0;
+  line-height: 1.55;
+}
+.section-title > button {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #bbd9c4;
+  background: #f6faf6;
+  color: #17654e;
+  border-radius: 7px;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.section-title > button:hover {
+  background: #e9f5e9;
+}
+.leaders-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 11px;
+  margin-top: 19px;
+}
+.leader-card {
+  position: relative;
+  text-align: left;
+  border: 1px solid #dce8dd;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 17px 18px 14px;
+  min-height: 150px;
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.leader-card:hover {
+  transform: translateY(-3px);
+  border-color: #9acbb0;
+  box-shadow: 0 7px 20px rgba(30, 75, 45, 0.07);
+}
+.leader-rank {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #25826a;
+  font-size: 11px;
+  font-weight: 850;
+}
+.leader-rank span {
+  color: #97a99c;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+.leader-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 21px;
+  gap: 6px;
+}
+.leader-main strong {
+  font:
+    500 26px Georgia,
+    serif;
+  letter-spacing: -0.04em;
+}
+.leader-main > span {
+  font-size: 23px;
+  color: #146c59;
+  font-weight: 800;
+  letter-spacing: -0.06em;
+}
+.leader-main small {
+  font-size: 10px;
+  color: #8ca095;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.leader-foot {
+  display: flex;
+  justify-content: space-between;
+  color: #83998c;
+  font-size: 10px;
+  border-top: 1px solid #ebf0ea;
+  padding-top: 10px;
+  margin-top: 11px;
+  padding-right: 12px;
+}
+.leader-arrow {
+  position: absolute;
+  bottom: 12px;
+  right: 13px;
+  color: #68a282;
+}
+.leader-foot .change {
+  font-size: 10px;
+}

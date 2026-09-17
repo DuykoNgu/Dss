@@ -74,7 +74,7 @@ Voi moi ma co phieu, DSS:
 ```
 
 Lenh nay tao `.venv` trong project, cai dependencies (da ghim version) tu
-`requirements.txt` va tao cac thu muc cache can thiet.
+`backend/requirements.txt` va tao cac thu muc cache can thiet.
 
 ### Quy trinh chay de xuat
 
@@ -95,13 +95,13 @@ vnstock gioi han 20 don vi quota/phut (moi lan tai ton 2 don vi).
 Chay offline voi cache da co:
 
 ```bash
-python main.py --no-fetch --symbols FPT,ACB
+python backend/main.py --no-fetch --symbols FPT,ACB
 ```
 
 Neu chi muon dong bo du lieu roi dung:
 
 ```bash
-python main.py --fetch-only
+python backend/main.py --fetch-only
 ```
 
 ## 3. Cac lenh
@@ -113,17 +113,87 @@ python main.py --fetch-only
 | `./run.sh dss` | Chay pipeline va in bang khuyen nghi |
 | `./run.sh dss --retrain` | Bo qua model cache va train lai |
 | `./run.sh test` | Chay unit test |
+| `./run.sh web` | Mo bang gia VN30, so sanh ma va hoi ML tai `http://127.0.0.1:8765/` |
 | `./run.sh smoke` | Smoke test pipeline offline voi 2 ma |
 | `./run.sh evaluate --symbols FPT,ACB` | Tao phan bo label, metrics va confusion matrix |
 | `./run.sh tune --symbols FPT,ACB` | So sanh ba cau hinh RF/XGBoost bang walk-forward |
 | `./run.sh backtest` | Backtest walk-forward VN30: blend/rule/ml, tung ma, danh muc, rank IC |
 | `./run.sh backtest --pooled` | Nhu tren nhung dung mot model hoc chung du lieu moi ma |
-| `python main.py --fetch-only --with-history` | Tai them du lieu cac ma tung thuoc VN30 (cho `--universe history`) |
+| `python backend/main.py --fetch-only --with-history` | Tai them du lieu cac ma tung thuoc VN30 (cho `--universe history`) |
 | `./run.sh evaluate --label-strategy excess --horizon 20` | Walk-forward voi nhan vuot VNINDEX, tam nhin 20 phien |
 | `./run.sh status` | Kiem tra du lieu, model va source |
 | `./run.sh clear-data` | Xoa CSV cache, giu lai model |
 | `./run.sh clean` | Xoa data cache, model va `__pycache__` |
 | `./run.sh help` | In danh sach lenh |
+
+Giao dien web la du an React + Vite trong `frontend/`, dung Lucide React cho bieu tuong
+va Recharts cho do thi gia. `./run.sh web` tu cai npm dependencies (lan dau), build
+giao dien, roi chay API FastAPI/Uvicorn tai `http://127.0.0.1:8765/`.
+Khi phat trien giao dien, giu backend dang chay va dung `cd frontend && npm run dev`
+de co hot reload tai localhost:5173 (Vite proxy `/api` ve backend).
+Huong dan chay mot may Linux voi systemd, reverse proxy va health check nam tai
+[`deploy/README.md`](deploy/README.md). CI tai `.github/workflows/ci.yml` chay
+test backend, test/lint/format/build frontend tren moi push va pull request.
+Code giao dien nam trong `frontend/src/features/` theo tung luong: `market/` (bang gia,
+do thi, so sanh), `discovery/`, `research/`, `assistant/`. `frontend/src/common/api.js`
+la noi duy nhat goi API. `backend/api/server.py` chi xu ly HTTP va static files;
+`backend/api/features/market.py` giu snapshot, polling va route thi truong;
+`backend/api/features/assistant.py` giu route hoi dap;
+`backend/api/features/profit_loss.py` tinh loi/lo theo gia dong cua. `common/format.js` va
+`Change.jsx` dung chung cho cac tinh nang. `App.jsx` ghep cac phan va giu ma dang chon.
+Chay `cd frontend && npm test` de kiem tra hop dong API, `npm run lint` de bat loi
+tham chieu/bien thua, `npm run format:check` de kiem tra dinh dang va
+`npm run build` de tao ban phuc vu.
+
+Sau `./run.sh fetch`, chay `./run.sh web`. Trong gio giao dich (9h–15h,
+thu 2–6, gio Viet Nam), backend polling bang gia VN30 theo lo moi 20 giay;
+frontend lay snapshot moi 20 giay. Gia trong phien, tham chieu va bien dong
+lay tu bang gia vnstock, co thoi diem backend nhan gia; neu API loi hoac ngoai
+gio giao dich, giao dien dung gia nen ngay da chot. Sau 15h backend dong bo
+nen ngay va tinh lai snapshot/model khi du lieu moi co san, khong can khoi dong
+lai. Khi mot ma chua co nen ngay moi, snapshot cu duoc giu lai va dong bo duoc
+thu lai sau 15 phut. API tra `data_as_of`, `snapshot_generated_at`, `quote_as_of`,
+`quote_status`, `model_id`, `model_version`, `model_spec` va `contract_version` de
+frontend hien dung do moi va cau hinh diem. Gioi han do tre thuc te phu thuoc
+nguon vnstock, khong phai tick stream.
+Lan dau may chu huan luyen model chung `excess` T+20 tu lich su thanh phan VN30
+va luu vao `backend/models/`; ML va do thi chi dung nen ngay da chot, khong train tren
+gia trong phien. Chat ML
+mo tu nut noi goc phai; no chi nhan cau hoi ve xep hang VN30, ma trong ro, so
+sanh ma va phuong phap. Diem ML la diem xep hang tuong doi, khong phai xac suat
+lai hay lenh mua.
+Chon ma trong bang gia de mo cua so phan tich voi do thi, hang ML va cac ma co
+diem cao hon. Co the dong cua so bang nut X, phim Escape hoac bam ben ngoai.
+Trong cua so nay, nhap ngay mua, gia mua (nghin dong/CP) va so co phieu roi
+bam "Tinh loi/lo". Frontend goi `POST /api/profit-loss`; backend tinh cho tung
+phien trong 120 nen gan nhat. Loi/lo tam tinh = gia dong cua x so CP x 1.000
+- chi phi ban gia dinh - (gia mua x so CP x 1.000 + chi phi mua). Chi phi mua
+gom phi va truot gia; chi phi ban gom phi, thue va truot gia theo `backend/config.py`.
+Bang hien thay doi so voi phien truoc, loi/lo tich luy, muc loi cao nhat va lo
+lon nhat. Day la mo phong theo nen da dong, khong phai du bao tung phien tuong lai
+hay so tien da thuc hien; chua tinh co tuc va quyen co phieu.
+
+Cache va chia tai (mot may, filesystem dung chung):
+
+```bash
+./run.sh web-balanced
+```
+
+Lenh tren build React, tao `backend/data/web_snapshot.json` mot lan, chay mot
+producer cap nhat du lieu va hai ASGI worker cua Uvicorn tai cong 8765. Worker
+chi doc snapshot, khong goi vnstock hoac train model. Snapshot
+duoc ghi nguyen tu, tai su dung neu file du lieu khong doi; dung
+`./run.sh web --build-only --rebuild` de ep tao lai.
+Gia trong phien qua 60 giay khong duoc worker phuc vu. API GET dung ETag de
+trinh duyet tai lai khi noi dung thay doi. `/health/live` va `/health/ready`
+dung cho giam sat tien trinh. Log API la JSON theo dong.
+Che do nay danh cho cac tien trinh tren cung mot may; neu chay tren nhieu may,
+can thay snapshot file bang kho du lieu chia se va mot load balancer ben ngoai.
+
+Popup ma cho thay ba tin hieu phan lop sau khi RF va XGBoost duoc lay trung binh
+va hieu chinh theo ty le lop trong du lieu train. Diem ML = 50 + 0,5 x
+(tin hieu vuot VNINDEX % - tin hieu kem VNINDEX %). Cac ty le nay giai thich
+phep tinh diem, khong phai xac suat sinh loi hay muc dong gop cua tung feature.
 
 Danh gia cac bien the label/feature:
 
@@ -137,13 +207,13 @@ Danh gia cac bien the label/feature:
 Ket qua duoc ghi vao:
 
 ```text
-reports/<label_strategy>_<feature_set>/
+backend/reports/<label_strategy>_<feature_set>/
 ├── label_distribution.csv
 ├── walk_forward_metrics.csv
 └── confusion_matrix.csv
 ```
 
-`reports/`, `data/` va `models/` dang duoc gitignore, vi vay day la artifact
+`backend/reports/`, `backend/data/` va `backend/models/` dang duoc gitignore, vi vay day la artifact
 cuc bo cua moi lan chay, khong phai du lieu dong goi san trong repository.
 
 ## 4. Kien truc pipeline
@@ -167,7 +237,7 @@ flowchart TD
 
 ### Phase 1 - Fetch va cache
 
-`src/data/data_fetcher.py`:
+`backend/src/data/data_fetcher.py`:
 
 - Quet danh sach VN30 bang `Reference().equity.list_by_group("VN30")`.
 - Neu API loi hoac tra ve duoi 20 ma, dung danh sach fallback.
@@ -189,7 +259,7 @@ flowchart TD
 
 ### Phase 2 - Lam sach
 
-`src/data/data_cleaner.py` yeu cau cot `time`, sap xep tang dan va chuyen
+`backend/src/data/data_cleaner.py` yeu cau cot `time`, sap xep tang dan va chuyen
 OHLC/volume ve dang so.
 
 - Chi `forward-fill` cac cot OHLC. Khong `backward-fill` de tranh lay du lieu
@@ -205,7 +275,7 @@ VNINDEX duoc chuan hoa thanh hai cot `time` va `indexValue`.
 
 ### Phase 3 - Chi bao ky thuat
 
-`src/features/indicators.py` tao cac cot chi bao sau:
+`backend/src/features/indicators.py` tao cac cot chi bao sau:
 
 | Nhom | Chi bao |
 |---|---|
@@ -261,7 +331,7 @@ Production mac dinh dung `fixed` voi mapping:
 
 ### Phase 5 - Train, nap model va du doan
 
-`src/models/ml_models.py`:
+`backend/src/models/ml_models.py`:
 
 - Loai cac dong thieu 19 feature hoac label.
 - Neu duoi `MIN_TRAIN_ROWS=100` dong thi khong train va dung ML score trung
@@ -271,9 +341,10 @@ Production mac dinh dung `fixed` voi mapping:
 - Khong shuffle.
 - Mac dinh train mot RF va mot XGBoost cho tung ma; `--pooled` (hoac
   `ML_POOLED=True`) train mot cap chung cho moi ma.
-- Luu tai `models/<SYMBOL>_rf.pkl`, `models/<SYMBOL>_xgb.pkl` (hoac
-  `models/POOLED_*.pkl`), kem prior cua tap train, feature schema va ngay cuoi
-  cua du lieu.
+- Luu ca cap RF/XGB nguyen tu tai `backend/models/<SYMBOL>_bundle.pkl` (hoac
+  `backend/models/POOLED_bundle.pkl`), kem prior, feature schema, nhan/tam nhin,
+  tham so, version thu vien va ngay cuoi du lieu. File RF/XGB cu duoc xoa sau
+  lan train va ghi bundle thanh cong.
 - Model cache tu train lai khi thieu metadata, khac feature schema hoac cu hon
   du lieu qua `MODEL_MAX_AGE_DAYS=7` ngay; `--retrain` ep train lai.
 
@@ -282,11 +353,11 @@ Chi tiet tham so va cach danh gia xem
 
 ### Phase 6 - Cham diem va khuyen nghi
 
-`src/scoring/scoring.py` cham Rule-based tu diem goc 50. Cac nhom dieu kien
+`backend/src/scoring/scoring.py` cham Rule-based tu diem goc 50. Cac nhom dieu kien
 gom trend, momentum, volume, volatility va VNINDEX. Diem sau cung bi gioi han
 trong `[0, 100]`.
 
-`src/scoring/decision.py` tinh:
+`backend/src/scoring/decision.py` tinh:
 
 ```text
 total_score = rule_score * 0.60 + ml_score * 0.40
@@ -338,7 +409,7 @@ future_return = close[t+5] / close[t] - 1
 
 Label BUY/SELL chi duoc gan khi bien dong vuot `ML_PROFIT_THRESHOLD` cong chi
 phi giao dich vong di-ve. Mac dinh chi phi nay la `0,6%` theo phi, thue va
-slippage trong `config.py`, de label khong coi mot giao dich gross +3% la
+slippage trong `backend/config.py`, de label khong coi mot giao dich gross +3% la
 thang neu loi nhuan rong sau chi phi khong dat muc tieu.
 
 Nam dong cuoi khong co gia `t+5`, vi vay label la NaN va khong duoc dung de
@@ -357,11 +428,11 @@ train.
 ### Train production
 
 ```bash
-python main.py --no-fetch --symbols FPT,ACB --retrain
+python backend/main.py --no-fetch --symbols FPT,ACB --retrain
 ```
 
 Lenh nay train tren toan bo du lieu co label, in metric holdout 20% cuoi de
-tham khao va luu model vao `models/`.
+tham khao va luu model vao `backend/models/`.
 
 ### Danh gia walk-forward
 
@@ -454,7 +525,7 @@ Day la ket qua phan loai, khong phai loi nhuan giao dich. Xem phan
 | `--exit barrier` | Them chot loi/cat lo trong phien khi gia cham `±(3% + 0,6%)` quanh gia vao (cham ca hai thi gia dinh cat lo truoc; chi tu phien T+3) |
 | `--universe history` | Dung thanh phan VN30 theo tung ky thay vi ro hien tai (xem ben duoi) |
 
-Quy trinh trong `src/backtest/backtester.py`:
+Quy trinh trong `backend/src/backtest/backtester.py`:
 
 - Cham diem Rule/ML/Total cho moi ma, tung phien trong 12 thang cuoi (mac
   dinh). Model retrain moi 20 phien, chi hoc tu dong co label da biet.
@@ -471,13 +542,13 @@ Quy trinh trong `src/backtest/backtester.py`:
   (tong `0,6%` moi vong mua-ban).
 
 Ket qua ghi vao
-`reports/backtest_<pooled|per_symbol>_<nhan>_h<N>_<exit>_<universe>_<thang>m/`, gom
+`backend/reports/backtest_<pooled|per_symbol>_<nhan>_h<N>_<exit>_<universe>_<thang>m/`, gom
 tong hop, Rank IC va loi nhuan danh muc theo tung nam, tung ma, tung lenh va
 bang diem (xem [REPORT_METRICS.md](REPORT_METRICS.md)).
 
 #### Thanh phan VN30 theo tung ky
 
-`reference/vn30_changes.csv` ghi ro VN30 ngay 03/08/2020 va moi lan them/loai ma
+`backend/reference/vn30_changes.csv` ghi ro VN30 ngay 03/08/2020 va moi lan them/loai ma
 den 03/08/2026 (13 ky xet duyet va 1 lan thay the bat thuong DGC → BSR), moi dong
 kem link bai cong bo. Ro goc 2020 duoc suy nguoc tu ro hien tai; unit test kiem
 tra moi ky deu du 30 ma va di xuoi het cac thay doi thi ra dung ro hien tai.
@@ -488,7 +559,7 @@ Voi `--universe history`:
   ngay do**; ma da roi ro van duoc giu den khi thoat lenh.
 - Benchmark "nam deu cac ma trong ro" tai can bang moi ngay theo ro cua ngay do.
 - Truoc 03/08/2020 dung ro goc (xap xi).
-- Can tai du lieu cac ma tung thuoc ro: `python main.py --fetch-only --with-history`.
+- Can tai du lieu cac ma tung thuoc ro: `python backend/main.py --fetch-only --with-history`.
   ROS (FLC Faros) da huy niem yet, chi con 34 phien nam 2022, nen giai doan
   08/2020–01/2021 ro chi co 29 ma co du lieu.
 
@@ -555,7 +626,7 @@ Ket luan:
   2020, 2021, 2022 va 2025 nhung thua trong 2023, 2024 va 2026; tinh chung
   2024–09/2026 van thua benchmark, va co drawdown -36%. Tin hieu xep hang on dinh, con luat giao dich (nguong 60, 5 slot,
   giu 20 phien) chua chuyen no thanh loi nhuan vuot thi truong mot cach on dinh.
-- Cac cau hinh production (`main.py`: nhan `fixed`, T+5, `blend` 60/40, model
+- Cac cau hinh production (`backend/main.py`: nhan `fixed`, T+5, `blend` 60/40, model
   moi ma) **chua duoc doi**; theo ket qua tren, day la nhom cau hinh kem nhat.
 
 ### Tune
@@ -566,11 +637,11 @@ Ket luan:
 
 Lenh nay so sanh ba ung vien:
 
-- `baseline`: cau hinh trong `config.py`.
+- `baseline`: cau hinh trong `backend/config.py`.
 - `regularized`: cay nong hon va leaf lon hon.
 - `responsive`: cay sau hon va leaf nho hon.
 
-Ket qua ghi vao `reports/tuning_results.csv`. Khong tu dong thay doi cau hinh
+Ket qua ghi vao `backend/reports/tuning_results.csv`. Khong tu dong thay doi cau hinh
 production.
 
 ## 7. He thong diem
@@ -621,39 +692,25 @@ duoc clip ve `[0, 100]`.
 
 ```text
 DSS/
-├── AGENTS.md          # quy tac cho nguoi/AI sua code
-├── config.py
-├── main.py
-├── backtest_runner.py
+├── AGENTS.md
 ├── run.sh
-├── requirements.txt
-├── src/
-│   ├── pipeline.py    # nap CSV -> clean -> indicators -> features, dung chung
-│   ├── data/
-│   │   ├── data_fetcher.py
-│   │   ├── data_cleaner.py
-│   │   └── universe.py    # doc reference/vn30_changes.csv
-│   ├── features/
-│   │   ├── indicators.py
-│   │   └── features.py
-│   ├── models/
-│   │   ├── ml_models.py
-│   │   ├── metrics.py
-│   │   ├── validation.py
-│   │   ├── evaluate.py
-│   │   └── tune.py
-│   ├── scoring/
-│   │   ├── scoring.py
-│   │   └── decision.py
-│   └── backtest/
-│       ├── backtester.py
-│       └── __init__.py
-├── reference/
-│   └── vn30_changes.csv   # thanh phan VN30 theo tung ky, co nguon
-├── tests/      # unit test: ./run.sh test
-├── data/       # CSV cache, gitignored, tao sau khi fetch
-├── models/     # file .pkl, gitignored
-└── reports/    # CSV danh gia, gitignored
+├── backend/
+│   ├── config.py
+│   ├── main.py
+│   ├── backtest_runner.py
+│   ├── requirements.txt
+│   ├── src/                  # data -> features -> models -> scoring/backtest
+│   ├── api/                  # ASGI routes, snapshot, polling
+│   ├── reference/            # lich su thanh phan VN30
+│   ├── tests/                # ./run.sh test
+│   ├── data/                 # CSV cache, gitignored
+│   ├── models/               # model cache, gitignored
+│   └── reports/              # ket qua danh gia, gitignored
+└── frontend/
+    ├── src/                  # React features va API client
+    ├── tests/
+    ├── package.json
+    └── vite.config.js
 ```
 
 ## 9. Tai lieu lien quan
@@ -665,8 +722,8 @@ DSS/
 | [dss_algorithm_analysis.md](dss_algorithm_analysis.md) | Ly thuyet cay quyet dinh, RF, XGBoost, ensemble, walk-forward va han che |
 | [AGENTS.md](AGENTS.md) | Lenh, cau truc va quy tac khong duoc pha khi sua code |
 
-Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
-`src/`.
+Nguon chinh de doi chieu hanh vi la `backend/config.py`, `backend/main.py` va cac module trong
+`backend/src/`.
 
 ## 10. Gioi han
 
@@ -676,7 +733,7 @@ Nguon chinh de doi chieu hanh vi la `config.py`, `main.py` va cac module trong
 - **Survivorship bias:** mac dinh (`--universe current`), train, danh gia va
   backtest dung ro VN30 hien tai cho ca 8 nam nen ket qua co xu huong dep hon
   thuc te. `--universe history` sua dieu nay tu 08/2020; truoc do van la xap xi,
-  va `evaluate`, `main.py` van dung ro hien tai.
+  va `evaluate`, `backend/main.py` van dung ro hien tai.
 - Mot so ma moi niem yet (TCX, VPL) co lich su ngan, gan nhu khong co ML.
 - Nhan `fixed` co the tao mat can bang lop, voi HOLD thuong chiem da so.
 - Ket qua phan loai hien tai con yeu va khong dong deu giua cac ma.
