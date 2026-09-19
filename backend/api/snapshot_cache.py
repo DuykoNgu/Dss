@@ -9,14 +9,14 @@ from typing import Callable
 
 import config
 
-CACHE_PATH = Path(config.DATA_DIR) / "web_snapshot.json"
+CACHE_PATH = Path(config.DATA_DIR) / "web_snapshot_sqlite.json"
 LOCK_PATH = Path(config.DATA_DIR) / "web_snapshot.lock"
-CACHE_VERSION = 4
+CACHE_VERSION = 6
 
 
 def source_stamp() -> list[list[int | str]]:
-    paths = [Path(config.INDEX_PATH), Path(config.BASE_DIR) / "reference/vn30_changes.csv"]
-    paths.extend(sorted(Path(config.STOCKS_DIR).glob("*.csv")))
+    paths = [Path(config.MARKET_DB_PATH), Path(f"{config.MARKET_DB_PATH}-wal"),
+             Path(config.BASE_DIR) / "reference/vn30_changes.csv"]
     return [[str(path.relative_to(config.BASE_DIR)), path.stat().st_size, path.stat().st_mtime_ns]
             for path in paths if path.exists()]
 
@@ -40,15 +40,25 @@ def read_snapshot() -> dict:
 def load_or_build_snapshot(builder: Callable[[], dict], rebuild: bool = False) -> dict:
     with build_lock():
         stamp = source_stamp()
+        cached = None
         if not rebuild:
             try:
                 cached = read_snapshot()
-                if cached.get("_cache_version") == CACHE_VERSION and cached.get("_source_stamp") == stamp:
+                if (cached.get("_cache_version") == CACHE_VERSION
+                        and cached.get("_source_stamp") == stamp and not cached.get("_sync_error")):
                     cached.pop("_quotes", None)
                     return cached
             except (FileNotFoundError, json.JSONDecodeError):
                 pass
-        snapshot = builder()
+        try:
+            snapshot = builder()
+        except Exception as error:
+            if cached and cached.get("date") and cached.get("stocks"):
+                cached.pop("_quotes", None)
+                cached["_sync_error"] = str(error)
+                write_snapshot(cached)
+                return cached
+            raise
         write_snapshot(snapshot)
         return snapshot
 

@@ -1,19 +1,16 @@
 """
-Phase 1: Thu thập OHLCV từ vnstock và cache CSV.
+Phase 1: Thu thập OHLCV từ vnstock và cập nhật SQLite.
 
 - Quét rổ VN30 (có danh sách dự phòng khi API lỗi).
 - Tải song song, retry lỗi mạng, chờ khi gặp rate limit.
-- Mã chưa có cache hoặc lịch sử ngắn hơn LOOKBACK_YEARS: tải full rồi ghi đè.
-- Mã đã có cache: tải chồng REFRESH_DAYS ngày cuối rồi gộp, để nến bị lưu dở
-  được thay bằng nến đã chốt.
+- Mã chưa có dữ liệu hoặc lịch sử ngắn hơn LOOKBACK_YEARS: tải full.
+- Mã đã có dữ liệu: tải chồng REFRESH_DAYS ngày cuối rồi upsert.
 - Giá điều chỉnh bị đổi (cổ tức, chia tách): tải full lại để cả chuỗi cùng
   một cơ sở giá.
 """
 
-import json
 import os
 import sys
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,8 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import pandas as pd
 
 import config
-
-DATA_DIR = config.DATA_DIR
+from src.data import store
 
 # Retry khi gọi API
 MAX_RETRIES = 5         # Số lần thử tối đa mỗi request
@@ -42,8 +38,8 @@ SECONDS_PER_CALL = 7
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 MARKET_CLOSE_HOUR = 15          # HOSE đóng cửa 14:45; từ 15:00 coi nến ngày đã chốt
-REFRESH_DAYS = 10               # Số ngày lịch tải chồng lên cuối cache mỗi lần cập nhật
-BACKFILL_TOLERANCE_DAYS = 30    # Cache bắt đầu muộn hơn START_DATE quá mức này -> tải full
+REFRESH_DAYS = 10               # Số ngày lịch tải chồng lên cuối dữ liệu mỗi lần cập nhật
+BACKFILL_TOLERANCE_DAYS = 30    # Lịch sử bắt đầu muộn hơn START_DATE quá mức này -> tải full
 ADJUSTMENT_TOLERANCE = 0.005    # Giá đóng cửa cũ/mới cùng ngày lệch > 0,5% -> giá đã điều chỉnh
 
 # Rổ VN30 (cập nhật 09/2026), chỉ dùng khi API lấy danh sách gặp sự cố
@@ -100,8 +96,10 @@ def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 
 def needs_full_refetch(old: pd.DataFrame, new: pd.DataFrame) -> bool:
     """Cùng ngày mà giá đóng cửa cũ/mới lệch nhau -> lịch sử đã được điều chỉnh lại."""
-    overlap = old[["time", "close"]].merge(
-        new[["time", "close"]], on="time", suffixes=("_old", "_new")
+    old = old[["time", "close"]].assign(time=lambda frame: frame["time"].dt.normalize())
+    new = new[["time", "close"]].assign(time=lambda frame: frame["time"].dt.normalize())
+    overlap = old.merge(
+        new, on="time", suffixes=("_old", "_new")
     )
     drift = (overlap["close_old"] / overlap["close_new"] - 1).abs()
     return bool((drift > ADJUSTMENT_TOLERANCE).any())
@@ -159,82 +157,24 @@ def fetch_market_index(index_code: str = "VNINDEX",
                         start_date, end_date or datetime.now(VN_TZ).strftime("%Y-%m-%d"))
 
 
-def merge_and_save(csv_path: str, new_df: pd.DataFrame) -> tuple[int, int]:
-    """Gộp nến mới vào CSV, trùng time thì giữ bản mới. Trả về (tổng dòng, dòng mới thêm)."""
-    old_len = 0
-    if os.path.exists(csv_path):
-        old = pd.read_csv(csv_path)
-        old_len = len(old)
-        # Align schema theo file cũ để API đổi cột giữa 2 lần fetch không tạo cột rác
-        new_df = new_df.reindex(columns=old.columns)
-        combined = pd.concat([old, new_df], ignore_index=True) if not new_df.empty else old
-    else:
-        combined = new_df
-    if combined.empty:
-        return 0, 0
-    combined["time"] = pd.to_datetime(combined["time"])
-    combined = combined.drop_duplicates(subset=["time"], keep="last")
-    combined = combined.sort_values("time").reset_index(drop=True)
-    save_csv_atomic(csv_path, combined)
-    return len(combined), len(combined) - old_len
-
-
-def save_csv_atomic(csv_path: str, frame: pd.DataFrame) -> None:
-    """Replace a CSV only after the complete new file is on disk."""
-    directory = os.path.dirname(csv_path)
-    os.makedirs(directory, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", dir=directory, suffix=".tmp",
-                                         delete=False, encoding="utf-8") as output:
-            temporary = output.name
-            frame.to_csv(output, index=False)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, csv_path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def _stock_path(sym: str) -> str:
-    return os.path.join(DATA_DIR, "stocks", f"{sym}.csv")
-
-
-def fetch_one_symbol(sym: str) -> tuple[str, dict]:
-    """Tải full lịch sử và ghi đè cache. Tải lỗi thì giữ nguyên cache cũ."""
-    df = fetch_stock_ohlcv(sym)
-    if df.empty:
-        return sym, {"rows": 0, "error": "no data"}
-    save_csv_atomic(_stock_path(sym), df)
-    return sym, {"rows": len(df), "cached": False, "full": True}
-
-
-def update_one_symbol(sym: str) -> tuple[str, dict]:
-    """Tải chồng REFRESH_DAYS ngày cuối rồi gộp; tự chuyển sang tải full khi cần."""
-    csv_path = _stock_path(sym)
-    try:
-        old = pd.read_csv(csv_path)
-        old["time"] = pd.to_datetime(old["time"])
-    except Exception:
-        return fetch_one_symbol(sym)
-
-    # Cache ngắn hơn LOOKBACK_YEARS (VD: vừa tăng LOOKBACK) -> tải full để bổ sung lịch sử.
-    # Mã mới niêm yết luôn rơi vào nhánh này; vẫn chỉ tốn 1 request như cập nhật thường.
+def _fetch_symbol_frame(symbol: str) -> tuple[str, pd.DataFrame, bool]:
+    latest = store.latest_date(symbol)
+    first = store.first_date(symbol)
     backfill_from = pd.Timestamp(config.START_DATE) + timedelta(days=BACKFILL_TOLERANCE_DAYS)
-    if old["time"].min() > backfill_from:
-        return fetch_one_symbol(sym)
-
-    # Tải chồng lên đoạn cuối: nến từng bị lưu khi phiên chưa đóng cửa sẽ được ghi đè
-    start = (old["time"].max() - timedelta(days=REFRESH_DAYS)).strftime("%Y-%m-%d")
-    new_df = fetch_stock_ohlcv(sym, start_date=start)
-    if new_df.empty:
-        return sym, {"rows": len(old), "cached": True}
-    if needs_full_refetch(old, new_df):
-        return fetch_one_symbol(sym)
-
-    total, added = merge_and_save(csv_path, new_df)
-    return sym, {"rows": total, "cached": False, "added": added}
+    replace = not (latest and first and pd.Timestamp(first) <= backfill_from)
+    if not replace:
+        start = (pd.Timestamp(latest) - timedelta(days=REFRESH_DAYS)).strftime("%Y-%m-%d")
+        frame = fetch_stock_ohlcv(symbol, start_date=start)
+        if frame.empty:
+            raise RuntimeError(f"{symbol}: API không trả nến")
+        if needs_full_refetch(store.read_bars(symbol), frame):
+            frame = fetch_stock_ohlcv(symbol)
+            replace = True
+    else:
+        frame = fetch_stock_ohlcv(symbol)
+    if frame.empty:
+        raise RuntimeError(f"{symbol}: API không trả nến")
+    return symbol, frame, replace
 
 
 def fetch_latest_quotes(symbols: list[str]) -> dict[str, dict]:
@@ -254,59 +194,39 @@ def fetch_latest_quotes(symbols: list[str]) -> dict[str, dict]:
 
 
 def save_data(symbols: list[str], df_index: pd.DataFrame, full_sync: bool = False) -> dict:
-    """Lưu VNINDEX + đồng bộ song song các mã.
-
-    symbols.json: full_sync=True (chạy full rổ) thì ghi đè; ngược lại hợp nhất
-    với manifest cũ để lần chạy giới hạn (--limit/--symbols) không làm mất list.
-    """
-    os.makedirs(os.path.join(DATA_DIR, "stocks"), exist_ok=True)
-    os.makedirs(os.path.join(DATA_DIR, "index"), exist_ok=True)
-
-    manifest = os.path.join(DATA_DIR, "symbols.json")
-    if full_sync or not os.path.exists(manifest):
-        manifest_symbols = list(symbols)
-    else:
-        try:
-            with open(manifest) as f:
-                old_symbols = json.load(f)
-        except Exception:
-            old_symbols = []
-        manifest_symbols = list(dict.fromkeys(list(old_symbols) + list(symbols)))
-    with open(manifest, "w") as f:
-        json.dump(manifest_symbols, f, indent=2, ensure_ascii=False)
-
+    """Fetch before writing, then publish the index and stocks in one transaction."""
     if df_index is None or df_index.empty:
-        print("⚠️ VNINDEX rỗng, vẫn lưu symbols + stocks.")
-    else:
-        total, added = merge_and_save(config.INDEX_PATH, df_index)
-        print(f"📈 VNINDEX: {total} dòng (+{added} mới)")
-
-    return sync_symbols(symbols)
+        raise RuntimeError("VNINDEX: API không trả nến")
+    index_rows = store.candle_rows(store.INDEX_SYMBOL, df_index)
+    valid_dates = [row[1] for row in index_rows if row[7]]
+    if not valid_dates or max(valid_dates) != max(row[1] for row in index_rows):
+        raise RuntimeError("VNINDEX: nến mới nhất không hợp lệ; giữ dữ liệu cũ")
+    target = max(valid_dates)
+    frames, replacements = _fetch_symbol_frames(symbols)
+    for symbol, frame in frames.items():
+        valid_dates = [row[1] for row in store.candle_rows(symbol, frame) if row[7]]
+        if not valid_dates or max(valid_dates) != target:
+            raise RuntimeError(f"{symbol}: thiếu nến hợp lệ ngày {target}; giữ dữ liệu cũ")
+    manifest = symbols if full_sync else sorted(set(store.current_symbols()) | set(symbols))
+    rejected = store.write_batch({store.INDEX_SYMBOL: df_index, **frames}, manifest, replacements)
+    print(f"Đồng bộ {target}: {len(symbols)} mã; {sum(rejected.values())} nến không hợp lệ đã đánh dấu")
+    return {"VN30_count": len(symbols), "symbols": symbols, "rejected": rejected}
 
 
 def sync_symbols(symbols: list[str]) -> dict:
-    """Đồng bộ song song CSV của các mã (không đụng symbols.json, VNINDEX)."""
-    os.makedirs(os.path.join(DATA_DIR, "stocks"), exist_ok=True)
-    summary = {"VN30_count": len(symbols), "symbols": symbols}
-    missing = [s for s in symbols if not os.path.exists(_stock_path(s))]
-    existing = [s for s in symbols if s not in missing]
-    print(f"📦 {len(missing)} mã tải mới, 🔄 {len(existing)} mã cập nhật.")
-    tasks = [(s, fetch_one_symbol) for s in missing] + [(s, update_one_symbol) for s in existing]
+    frames, replacements = _fetch_symbol_frames(symbols)
+    rejected = store.write_batch(frames, replace_symbols=replacements)
+    return {"symbols": symbols, "rejected": rejected}
 
-    if tasks:
-        print(f"🚀 Đồng bộ song song {len(tasks)} mã với {MAX_WORKERS} workers...")
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(fn, sym) for sym, fn in tasks]
-            for future in as_completed(futures):
-                sym, info = future.result()
-                summary[sym] = info
-                if info.get("rows", 0) == 0:
-                    print(f"  ❌ {sym}: no data")
-                elif info.get("full"):
-                    print(f"  ✅ {sym}: {info['rows']} rows (tải full)")
-                elif info.get("cached"):
-                    print(f"  ⏭️ {sym}: {info['rows']} rows (không đổi)")
-                else:
-                    print(f"  ✅ {sym}: {info['rows']} rows (+{info['added']} mới)")
 
-    return summary
+def _fetch_symbol_frames(symbols: list[str]) -> tuple[dict[str, pd.DataFrame], set[str]]:
+    frames = {}
+    replacements = set()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(_fetch_symbol_frame, symbol) for symbol in symbols]
+        for future in as_completed(futures):
+            symbol, frame, replace = future.result()
+            frames[symbol] = frame
+            if replace:
+                replacements.add(symbol)
+    return frames, replacements

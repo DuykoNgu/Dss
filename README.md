@@ -37,7 +37,7 @@ dat lenh va khong phai cam ket loi nhuan.
 Voi moi ma co phieu, DSS:
 
 1. Lay du lieu OHLCV lich su tu `vnstock`.
-2. Luu cache theo CSV va cap nhat them nen moi khi co the.
+2. Kiem tra nen va luu vao SQLite theo lo nguyen tu; cap nhat them nen moi.
 3. Lam sach du lieu theo thu tu thoi gian.
 4. Tinh chi bao ky thuat va tao feature tuong doi.
 5. Gan nhan huan luyen cho loi nhuan sau 5 phien.
@@ -109,7 +109,7 @@ python backend/main.py --fetch-only
 | Lenh | Tac dung |
 |---|---|
 | `./run.sh setup` | Tao virtual environment, cai thu vien, tao thu muc |
-| `./run.sh fetch` | Lay/cap nhat CSV VN30 va VNINDEX |
+| `./run.sh fetch` | Lay/cap nhat SQLite VN30 va VNINDEX |
 | `./run.sh dss` | Chay pipeline va in bang khuyen nghi |
 | `./run.sh dss --retrain` | Bo qua model cache va train lai |
 | `./run.sh test` | Chay unit test |
@@ -122,7 +122,7 @@ python backend/main.py --fetch-only
 | `python backend/main.py --fetch-only --with-history` | Tai them du lieu cac ma tung thuoc VN30 (cho `--universe history`) |
 | `./run.sh evaluate --label-strategy excess --horizon 20` | Walk-forward voi nhan vuot VNINDEX, tam nhin 20 phien |
 | `./run.sh status` | Kiem tra du lieu, model va source |
-| `./run.sh clear-data` | Xoa CSV cache, giu lai model |
+| `./run.sh clear-data` | Xoa SQLite va CSV cu, giu lai model |
 | `./run.sh clean` | Xoa data cache, model va `__pycache__` |
 | `./run.sh help` | In danh sach lenh |
 
@@ -179,7 +179,7 @@ Cache va chia tai (mot may, filesystem dung chung):
 ./run.sh web-balanced
 ```
 
-Lenh tren build React, tao `backend/data/web_snapshot.json` mot lan, chay mot
+Lenh tren build React, tao `backend/data/web_snapshot_sqlite.json` mot lan, chay mot
 producer cap nhat du lieu va hai ASGI worker cua Uvicorn tai cong 8765. Worker
 chi doc snapshot, khong goi vnstock hoac train model. Snapshot
 duoc ghi nguyen tu, tai su dung neu file du lieu khong doi; dung
@@ -220,8 +220,9 @@ cuc bo cua moi lan chay, khong phai du lieu dong goi san trong repository.
 
 ```mermaid
 flowchart TD
-    A["vnstock API / CSV cache"] --> B["Phase 1: Fetch + incremental cache"]
-    B --> C["Phase 2: Clean OHLCV + flags"]
+    A["vnstock API"] --> B["Phase 1: Fetch + validate"]
+    B --> S["SQLite: atomic upsert, UNIQUE symbol + date"]
+    S --> C["Phase 2: Clean OHLCV + flags"]
     C --> D["Phase 3: Technical indicators"]
     D --> E["Phase 4: Features + labels T+5"]
     E --> F["Phase 5: Train/load RF + XGBoost"]
@@ -246,16 +247,23 @@ flowchart TD
 - Moi lan goi API duoc gian cach `SECONDS_PER_CALL=7` giay (chung cho moi
   luong) de khong vuot quota; vnai goi `sys.exit` khi vuot quota nen loi nay
   duoc bat lai de cho va thu tiep.
-- Ma chua co CSV hoac lich su ngan hon 8 nam: tai full va ghi de.
-- Ma da co CSV: tai chong `REFRESH_DAYS=10` ngay cuoi roi gop (trung ngay thi
-  lay ban moi), nhu vay nen tung bi luu khi phien chua dong cua se duoc sua.
-- Neu gia dong cua trung ngay giua cache va API lech > 0,5% (gia dieu chinh do
-  co tuc/chia tach), tai full lai de ca chuoi cung mot co so gia.
+- Ma chua co trong SQLite hoac lich su ngan hon 8 nam: tai full.
+- Ma da co du lieu: tai chong `REFRESH_DAYS=10` ngay cuoi roi upsert theo
+  `(symbol, time)`; nen chua chot khong duoc luu.
+- Neu gia dong cua trung ngay giua kho va API lech > 0,5% (gia dieu chinh do
+  co tuc/chia tach), tai full va thay ca chuoi trong transaction de khong tron
+  hai co so gia.
 - Khong bao gio luu nen cua hom nay truoc 15:00 (gio Viet Nam).
 - vnstock chi duoc import khi thuc su goi API, kem
   `VNSTOCK_DISABLE_AGENT_SETUP=1` de thu vien khong tu ghi `AGENTS.md` vao
   project. Chay offline, train, backtest va test khong can vnstock.
-- `symbols.json` luu manifest cac ma da tung duoc dong bo.
+- Lan chay dau nhap CSV cu vao `backend/data/market.sqlite3`. Nen sai OHLC duoc
+  giu voi `valid=0` de doi chieu, khong dua vao model. CSV cu khong bi xoa.
+- Model cache duoc train lai mot lan sau khi chuyen kho de khong dung model cu
+  da hoc tren nến sai.
+- Chi ghi VNINDEX, cac ma va danh sach ma hien tai sau khi tat ca nến moi nhat
+  hop le; mot loi se rollback ca lo. Snapshot cu van duoc phuc vu neu dong bo
+  hoac dung model that bai.
 
 ### Phase 2 - Lam sach
 
@@ -566,7 +574,17 @@ Voi `--universe history`:
 Khi HOSE cong bo ky xet duyet moi (thang 1, thang 7) hoac thay the bat thuong,
 them dong vao file nay; test se bao loi neu ro khong con du 30 ma.
 
-### Ket qua hien tai
+### Ket qua tham chieu truoc chuyen doi
+
+**Luu y:** bang ket qua ben duoi duoc tinh truoc khi chuyen sang SQLite va loai
+nen OHLC sai; chi giu lam moc tham chieu, khong phai metric cua du lieu hien tai.
+Chay lai lenh backtest ben duoi de co ket qua moi. Giao dien an metric nghien cuu
+cu cho den khi bao cao duoc tao lai sau lan cap nhat du lieu.
+
+Kiem tra sau chuyen doi tren FPT/ACB: walk-forward `fixed` co 4 fold moi ma;
+backtest pooled `fixed` T+5 trong 6 thang (18/03–17/09/2026) cho danh muc
+`rule` -2,05%, `blend` -3,44%, `ml` +0,13% (Rank IC `ml` +0,008).
+Day la kiem tra luong du lieu hai ma, khong thay the bao cao VN30 72 thang.
 
 Nghien cuu chinh: model chung (`--pooled`), thanh phan VN30 theo tung ky
 (`--universe history`), 72 thang (25/08/2020 → 17/09/2026), retrain moi 60
@@ -703,7 +721,7 @@ DSS/
 │   ├── api/                  # ASGI routes, snapshot, polling
 │   ├── reference/            # lich su thanh phan VN30
 │   ├── tests/                # ./run.sh test
-│   ├── data/                 # CSV cache, gitignored
+│   ├── data/                 # SQLite va CSV cu nhap mot lan, gitignored
 │   ├── models/               # model cache, gitignored
 │   └── reports/              # ket qua danh gia, gitignored
 └── frontend/

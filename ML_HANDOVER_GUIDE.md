@@ -26,7 +26,8 @@ lợi nhuận trong tương lai.
 
 ```mermaid
 flowchart TD
-    A[CSV cache hoặc vnstock API] --> B[Clean OHLCV và VNINDEX]
+    A[vnstock API hoặc CSV cũ khi nhập lần đầu] --> S[Validate và SQLite]
+    S --> B[Clean OHLCV và VNINDEX]
     B --> C[Tính technical indicators]
     C --> D[Tạo features quá khứ hiện tại]
     D --> E[Tạo future return và label]
@@ -59,7 +60,9 @@ flowchart TD
 
 ### 3.1. Dữ liệu cổ phiếu
 
-Dữ liệu cổ phiếu được lưu tại `backend/data/stocks/<SYMBOL>.csv` với các cột bắt buộc:
+Dữ liệu cổ phiếu được lưu tại `backend/data/market.sqlite3`, bảng `market_data`,
+khóa chính `(symbol, time)`. CSV cũ được nhập một lần và giữ lại để đối chiếu.
+Các cột nến bắt buộc:
 
 ```text
 time, open, high, low, close, volume
@@ -68,17 +71,20 @@ time, open, high, low, close, volume
 Mặc định hệ thống lấy 8 năm (giới hạn nến ngày của vnstock bản miễn phí).
 Quy tắc cache:
 
-- Mã chưa có CSV hoặc lịch sử ngắn hơn 8 năm: tải full và ghi đè.
-- Mã đã có CSV: tải chồng 10 ngày cuối rồi gộp, trùng `time` thì lấy bản mới.
+- Mã chưa có trong SQLite hoặc lịch sử ngắn hơn 8 năm: tải full.
+- Mã đã có dữ liệu: tải chồng 10 ngày cuối rồi upsert theo `(symbol, time)`.
+- Nến sai OHLC được giữ với `valid=0`, không dùng cho feature/model; lỗi nến
+  mới nhất của một mã khiến cả lần đồng bộ không được ghi.
 - Không lưu nến của hôm nay trước 15:00 giờ Việt Nam (nến chưa chốt).
 - Giá đóng cửa trùng ngày lệch > 0,5% giữa cache và API nghĩa là giá đã được
-  điều chỉnh (cổ tức, chia tách): tải full lại để cả chuỗi cùng cơ sở giá.
+  điều chỉnh (cổ tức, chia tách): tải full và thay cả chuỗi trong transaction
+  để tránh trộn hai cơ sở giá.
 - Mọi lần gọi API giãn cách 7 giây vì gói Guest giới hạn 20 đơn vị quota/phút
   và mỗi lần tải tốn 2 đơn vị.
 
 ### 3.2. Dữ liệu VNINDEX
 
-File `backend/data/index/VNINDEX.csv` được chuẩn hóa thành:
+VNINDEX nằm trong cùng bảng với `symbol='VNINDEX'`, được đọc thành:
 
 ```text
 time, indexValue

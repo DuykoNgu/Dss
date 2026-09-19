@@ -74,6 +74,7 @@ MODEL_DIR = os.path.join(BASE_DIR, "models")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 STOCKS_DIR = os.path.join(DATA_DIR, "stocks")
 INDEX_PATH = os.path.join(DATA_DIR, "index", "VNINDEX.csv")
+MARKET_DB_PATH = os.path.join(DATA_DIR, "market.sqlite3")
 REPORT_DIR = os.path.join(BASE_DIR, "reports")
 
 # ── 7. vnstock API ──

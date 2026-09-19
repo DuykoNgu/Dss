@@ -15,6 +15,7 @@ import pandas as pd
 
 import config
 from src.data import clean_ohlcv_data, fetch_latest_quotes, fetch_market_index, save_data
+from src.data import store
 from src.data.universe import load_vn30_changes, membership_mask, vn30_members, vn30_symbols_ever
 from src.models import explain_ml_score, load_ml_models, model_is_stale, train_ml_models
 from src.pipeline import load_featured, load_market_index
@@ -27,6 +28,7 @@ POLL_SECONDS = 20
 SYNC_RETRY_SECONDS = 900
 NO_SESSION_RETRY_SECONDS = 3600
 QUOTE_MAX_AGE_SECONDS = 60
+QUOTE_SOURCE_MAX_AGE_SECONDS = 300
 QUOTE_PRICE_UNIT = 1000
 WEB_MODEL_SPEC = {"label_strategy": "excess", "horizon": HORIZON,
                   "feature_set": "baseline"}
@@ -56,7 +58,7 @@ def recommendation(rows: list[dict], symbol: str) -> dict:
 def load_snapshot() -> dict:
     index = load_market_index()
     if index.empty:
-        raise RuntimeError("Thiếu dữ liệu VNINDEX. Chạy ./run.sh fetch trước.")
+        raise RuntimeError("Thiếu VNINDEX trong SQLite. Chạy ./run.sh fetch trước.")
     date = index["time"].max()
     changes = load_vn30_changes()
     current = sorted(vn30_members(changes, date))
@@ -98,10 +100,7 @@ def load_snapshot() -> dict:
                 (config.ML_PROFIT_THRESHOLD + config.ML_LABEL_COST_RATE) * 100, 2
             )
     for symbol in current:
-        path = Path(config.STOCKS_DIR) / f"{symbol}.csv"
-        if not path.exists():
-            continue
-        candles = clean_ohlcv_data(pd.read_csv(path))
+        candles = clean_ohlcv_data(store.read_bars(symbol))
         if candles.empty:
             continue
         last = candles.iloc[-1]
@@ -127,8 +126,10 @@ def load_snapshot() -> dict:
         })
     latest.sort(key=lambda row: row["symbol"])
     report_path = Path(config.REPORT_DIR) / "backtest_pooled_excess_h20_horizon_history_72m" / "backtest_summary.csv"
+    data_files = [Path(config.MARKET_DB_PATH), Path(f"{config.MARKET_DB_PATH}-wal")]
+    data_updated_at = max((path.stat().st_mtime_ns for path in data_files if path.exists()), default=0)
     research = None
-    if report_path.exists():
+    if report_path.exists() and report_path.stat().st_mtime_ns >= data_updated_at:
         summary = pd.read_csv(report_path).set_index("mode").loc["ml"]
         research = {
             "rank_ic": round(float(summary["rank_ic"]), 3),
@@ -171,17 +172,20 @@ def quote_price(value) -> float | None:
 
 def live_quote(row: dict, now: datetime) -> dict | None:
     source_time = row.get("time")
-    observed_at = None
-    if source_time is not None:
-        try:
-            if isinstance(source_time, (int, float)):
-                observed_at = datetime.fromtimestamp(source_time / 1000, VN_TZ)
-            else:
-                observed_at = pd.Timestamp(source_time).to_pydatetime()
-            if observed_at.date() != now.date():
-                return None
-        except (ValueError, TypeError, OverflowError):
+    if source_time is None:
+        return None
+    try:
+        if isinstance(source_time, (int, float)):
+            observed_at = datetime.fromtimestamp(source_time / 1000, VN_TZ)
+        else:
+            observed_at = pd.Timestamp(source_time).to_pydatetime()
+            observed_at = (observed_at.replace(tzinfo=VN_TZ) if observed_at.tzinfo is None
+                           else observed_at.astimezone(VN_TZ))
+        age = (now - observed_at).total_seconds()
+        if observed_at.date() != now.date() or not 0 <= age <= QUOTE_SOURCE_MAX_AGE_SECONDS:
             return None
+    except (ValueError, TypeError, OverflowError):
+        return None
     price = quote_price(row.get("close_price"))
     if price is None:
         return None
@@ -208,7 +212,7 @@ class MarketState:
         self.cache_mtime = 0
         self.quote_status = "closed"
         self.quote_as_of = None
-        self.sync_error = None
+        self.sync_error = snapshot.get("_sync_error")
 
     def market(self) -> dict:
         with self.lock:
@@ -278,32 +282,27 @@ class MarketState:
         if status != previous_status:
             LOGGER.info("Quote status=%s coverage=%d/%d", status, len(quotes), len(symbols))
 
-    def sync_daily(self, now: datetime) -> bool:
+    def sync_daily(self) -> bool:
         index = fetch_market_index()
-        if index.empty or index["time"].max().date() != now.date():
-            LOGGER.warning("VNINDEX chưa có nến đóng ngày %s; sẽ thử lại", now.date())
+        if index.empty or index["time"].max().date().isoformat() <= self.snapshot["date"]:
+            LOGGER.info("VNINDEX chưa có nến đóng mới hơn %s", self.snapshot["date"])
             return False
-        symbols = sorted(vn30_members(load_vn30_changes(), pd.Timestamp(now.date())))
+        session_date = index["time"].max().date()
+        symbols = sorted(vn30_members(load_vn30_changes(), pd.Timestamp(session_date)))
         if not symbols:
             raise RuntimeError("Chưa có danh sách VN30 hợp lệ cho phiên mới")
-        save_data(symbols, index)
-        for symbol in symbols:
-            path = Path(config.STOCKS_DIR) / f"{symbol}.csv"
-            if not path.exists():
-                raise RuntimeError(f"Thiếu dữ liệu {symbol} sau đồng bộ")
-            dates = pd.read_csv(path, usecols=["time"])["time"]
-            if dates.empty or pd.to_datetime(dates.iloc[-1]).date() != now.date():
-                raise RuntimeError(f"{symbol} chưa có nến đóng ngày {now.date()}")
+        save_data(symbols, index, full_sync=True)
         snapshot = load_snapshot()
         with self.lock:
             self.snapshot = snapshot
             self.quotes = {}
             self.sync_error = None
-        LOGGER.info("Đồng bộ dữ liệu ngày %s hoàn tất với %d mã", now.date(), len(symbols))
+        LOGGER.info("Đồng bộ dữ liệu ngày %s hoàn tất với %d mã", session_date, len(symbols))
         return True
 
     def run(self, stop: threading.Event) -> None:
         next_sync_at = None
+        first_poll = True
         while not stop.is_set():
             now = datetime.now(VN_TZ)
             try:
@@ -311,10 +310,11 @@ class MarketState:
                     self.poll(now)
                 with self.lock:
                     snapshot_date = self.snapshot["date"]
-                if (now.weekday() < 5 and now.hour >= 15 and snapshot_date < now.date().isoformat()
+                if ((first_poll or (now.weekday() < 5 and now.hour >= 15))
+                        and snapshot_date < now.date().isoformat()
                         and (next_sync_at is None or now >= next_sync_at)):
                     next_sync_at = now + timedelta(seconds=SYNC_RETRY_SECONDS)
-                    if not self.sync_daily(now):
+                    if not self.sync_daily():
                         next_sync_at = now + timedelta(seconds=NO_SESSION_RETRY_SECONDS)
                 if now.hour < 15:
                     self.poll(now)
@@ -323,6 +323,7 @@ class MarketState:
                 with self.lock:
                     self.sync_error = str(error)
                 LOGGER.exception("Không cập nhật được thị trường")
+            first_poll = False
             stop.wait(POLL_SECONDS)
 
 

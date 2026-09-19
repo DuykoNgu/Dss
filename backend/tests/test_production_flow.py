@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 
 from api.features.market import MarketState
 from api.server import create_app
-from src.data.data_fetcher import save_csv_atomic
+from src.data import store
+from src.data.data_fetcher import save_data
 from src.features import FEATURE_COLUMNS
 from src.models.ml_models import load_ml_models, model_is_stale, train_ml_models
 
@@ -22,19 +23,21 @@ class PersistedModel:
 
 
 class ProductionFlowTests(unittest.TestCase):
-    def test_csv_replace_keeps_previous_file_when_write_fails(self):
+    def test_batch_rejects_missing_stock_without_changing_store(self):
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "FPT.csv"
-            target.write_text("complete\n")
-            frame = Mock()
-            def fail_write(output, index):
-                output.write("partial")
-                raise OSError("disk error")
-            frame.to_csv.side_effect = fail_write
-            with self.assertRaises(OSError):
-                save_csv_atomic(str(target), frame)
-            self.assertEqual(target.read_text(), "complete\n")
-            self.assertEqual(list(Path(directory).iterdir()), [target])
+            candle = pd.DataFrame({"time": ["2026-09-17"], "open": [100], "high": [101],
+                                   "low": [99], "close": [100], "volume": [1000]})
+            with patch("config.MARKET_DB_PATH", str(Path(directory) / "market.sqlite3")), \
+                 patch("config.STOCKS_DIR", str(Path(directory) / "stocks")), \
+                 patch("config.INDEX_PATH", str(Path(directory) / "VNINDEX.csv")), \
+                 patch("config.DATA_DIR", directory):
+                store.write_batch({"VNINDEX": candle, "FPT": candle}, ["FPT"])
+                stale = candle.assign(time=["2026-09-18"])
+                with patch("src.data.data_fetcher._fetch_symbol_frames", return_value=({"FPT": candle}, set())):
+                    with self.assertRaises(RuntimeError):
+                        save_data(["FPT"], stale)
+                self.assertEqual(store.latest_date("VNINDEX"), "2026-09-17")
+                self.assertEqual(store.latest_date("FPT"), "2026-09-17")
 
     def test_model_pair_is_one_bundle_and_validates_spec(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -51,21 +54,39 @@ class ProductionFlowTests(unittest.TestCase):
             self.assertTrue(model_is_stale(rf, frame["time"].max(), {"horizon": 20}))
 
     def test_daily_sync_keeps_snapshot_when_one_stock_is_old(self):
-        now = datetime(2026, 9, 17, 15, 30, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
         snapshot = {"date": "2026-09-16", "stocks": [{"symbol": "FPT"}], "history": {}}
         state = MarketState(snapshot)
-        with tempfile.TemporaryDirectory() as directory:
-            Path(directory, "FPT.csv").write_text("time\n2026-09-16\n")
-            index = pd.DataFrame({"time": pd.to_datetime(["2026-09-17"])})
-            with patch("api.features.market.fetch_market_index", return_value=index), \
-                 patch("api.features.market.save_data"), \
-                 patch("api.features.market.vn30_members", return_value={"FPT"}), \
-                 patch("api.features.market.config.STOCKS_DIR", directory), \
-                 patch("api.features.market.load_snapshot") as build:
-                with self.assertRaises(RuntimeError):
-                    state.sync_daily(now)
-                build.assert_not_called()
+        index = pd.DataFrame({"time": pd.to_datetime(["2026-09-17"])})
+        with patch("api.features.market.fetch_market_index", return_value=index), \
+             patch("api.features.market.save_data", side_effect=RuntimeError("FPT thiếu nến")), \
+             patch("api.features.market.vn30_members", return_value={"FPT"}), \
+             patch("api.features.market.load_snapshot") as build:
+            with self.assertRaises(RuntimeError):
+                state.sync_daily()
+            build.assert_not_called()
         self.assertIs(state.snapshot, snapshot)
+
+    def test_daily_sync_accepts_latest_closed_session_on_next_morning(self):
+        state = MarketState({"date": "2026-09-16", "stocks": [], "history": {}})
+        index = pd.DataFrame({"time": pd.to_datetime(["2026-09-17"])})
+        with patch("api.features.market.fetch_market_index", return_value=index), \
+             patch("api.features.market.save_data"), \
+             patch("api.features.market.vn30_members", return_value={"FPT"}) as members, \
+             patch("api.features.market.load_snapshot", return_value={"date": "2026-09-17"}):
+            self.assertTrue(state.sync_daily())
+        self.assertEqual(members.call_args.args[1], pd.Timestamp("2026-09-17"))
+        self.assertEqual(state.snapshot["date"], "2026-09-17")
+
+    def test_startup_checks_for_closed_session_before_market_opens(self):
+        state = MarketState({"date": "2026-09-16", "stocks": [], "history": {}})
+        stop = Mock()
+        stop.is_set.side_effect = [False, True]
+        with patch("api.features.market.datetime") as clock, \
+             patch.object(state, "poll"), patch.object(state, "publish"), \
+             patch.object(state, "sync_daily", return_value=True) as sync:
+            clock.now.return_value = datetime(2026, 9, 18, 8, 30, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+            state.run(stop)
+        sync.assert_called_once()
 
     def test_failed_daily_sync_is_retried_after_backoff(self):
         state = MarketState({"date": "2026-09-16", "stocks": [], "history": {}})

@@ -52,6 +52,15 @@ class WebFlowTests(unittest.TestCase):
         state.poll(now.replace(hour=16))
         self.assertIsNone(state.market()["stocks"][0]["quote"])
 
+    def test_live_quote_requires_recent_source_time_in_vietnam(self):
+        now = datetime(2026, 9, 17, 10, 30, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        row = {"close_price": 120000}
+        self.assertIsNone(live_quote(row, now))
+        self.assertIsNone(live_quote({**row, "time": "2026-09-17 10:24:59"}, now))
+        self.assertIsNone(live_quote({**row, "time": "2026-09-17 10:30:01"}, now))
+        self.assertEqual(live_quote({**row, "time": "2026-09-17 10:29:00"}, now)["source_at"],
+                         "2026-09-17T10:29:00+07:00")
+
     def test_feature_routes_share_one_snapshot(self):
         state = MarketState({"date": "2026-09-17", "stocks": ROWS,
                              "history": {"FPT": [{"date": "2026-09-17", "close": 74.3}]}})

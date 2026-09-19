@@ -165,6 +165,9 @@ cmd_clear_data() {
     if [ -f "$BACKEND_DIR/data/symbols.json" ]; then
         echo -e "   symbols.json: ${CYAN}có${NC} (sẽ xóa để fetch quét lại rổ VN30 mới)"
     fi
+    if [ -f "$BACKEND_DIR/data/market.sqlite3" ]; then
+        echo -e "   SQLite: ${CYAN}có${NC} (sẽ xóa cùng dữ liệu CSV cũ)"
+    fi
     echo -e "   Models trong ${CYAN}models/${NC}: ${YELLOW}giữ nguyên${NC} (muốn xóa cả models thì dùng './run.sh clean')"
     echo ""
 
@@ -185,6 +188,9 @@ cmd_clear_data() {
 
     echo -e "${YELLOW}🗑️  Xóa data/symbols.json...${NC}"
     rm -f "$BACKEND_DIR/data/symbols.json"
+    rm -f "$BACKEND_DIR/data/market.sqlite3" "$BACKEND_DIR/data/market.sqlite3-wal" "$BACKEND_DIR/data/market.sqlite3-shm"
+    rm -f "$BACKEND_DIR/data/web_snapshot.json"
+    rm -f "$BACKEND_DIR/data/web_snapshot_sqlite.json"
 
     mkdir -p "$BACKEND_DIR/data/stocks" "$BACKEND_DIR/data/index"
 
@@ -200,6 +206,9 @@ cmd_clean() {
     rm -rf "$BACKEND_DIR/data/stocks/"*.csv
     rm -rf "$BACKEND_DIR/data/index/"*.csv
     rm -f "$BACKEND_DIR/data/symbols.json"
+    rm -f "$BACKEND_DIR/data/market.sqlite3" "$BACKEND_DIR/data/market.sqlite3-wal" "$BACKEND_DIR/data/market.sqlite3-shm"
+    rm -f "$BACKEND_DIR/data/web_snapshot.json"
+    rm -f "$BACKEND_DIR/data/web_snapshot_sqlite.json"
 
     echo -e "${YELLOW}🗑️  Xóa models đã train...${NC}"
     rm -rf "$BACKEND_DIR/models/"*.pkl
@@ -214,18 +223,12 @@ cmd_status() {
     print_header "Trạng Thái Dự Án"
 
     echo -e "${BOLD}📂 Dữ liệu:${NC}"
-    if [ -d "$BACKEND_DIR/data/stocks" ]; then
-        CSV_COUNT=$(ls "$BACKEND_DIR/data/stocks/"*.csv 2>/dev/null | wc -l | tr -d ' ')
-        echo -e "   Stocks CSV: ${CYAN}${CSV_COUNT} file${NC}"
+    if [ -f "$BACKEND_DIR/data/market.sqlite3" ]; then
+        echo -e "   SQLite: ${CYAN}$BACKEND_DIR/data/market.sqlite3${NC}"
+        activate_venv
+        (cd "$BACKEND_DIR" && python3 -c 'from src.data import store; print("   Phiên mới nhất:", store.latest_date("VNINDEX") or "chưa có")')
     else
-        echo -e "   Stocks CSV: ${RED}chưa có${NC}"
-    fi
-
-    if [ -f "$BACKEND_DIR/data/index/VNINDEX.csv" ]; then
-        INDEX_ROWS=$(wc -l < "$BACKEND_DIR/data/index/VNINDEX.csv" | tr -d ' ')
-        echo -e "   VNINDEX:    ${CYAN}${INDEX_ROWS} dòng${NC}"
-    else
-        echo -e "   VNINDEX:    ${RED}chưa có${NC}"
+        echo -e "   SQLite: ${RED}chưa có (CSV cũ sẽ được nhập khi chạy)${NC}"
     fi
 
     echo ""
@@ -338,7 +341,7 @@ cmd_help() {
     echo -e "  ${CYAN}web${NC}          Build React và mở bảng giá VN30 tại localhost:8765"
     echo -e "  ${CYAN}web-balanced${NC} Build React, chạy producer và 2 ASGI worker tại localhost:8765"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
-    echo -e "  ${CYAN}clear-data${NC}   Chỉ xóa data cũ (stocks/index/symbols.json), giữ models"
+    echo -e "  ${CYAN}clear-data${NC}   Xóa SQLite và CSV cũ, giữ models"
     echo -e "  ${CYAN}clean${NC}        Xóa cache data, models, __pycache__"
     echo -e "  ${CYAN}push${NC}         Push code lên GitHub bằng 1 lệnh"
     echo -e "  ${CYAN}help${NC}         Hiển thị hướng dẫn này"

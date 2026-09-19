@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import os
-
 import pandas as pd
 
 import config
 from src.data import clean_index_data, clean_ohlcv_data
+from src.data import store
 from src.features import build_features_and_labels, calculate_technical_indicators
 
 
@@ -17,20 +15,11 @@ def parse_symbols(raw: str) -> list[str]:
 
 
 def cached_symbols() -> list[str]:
-    """Danh sách mã đã đồng bộ: symbols.json, không có thì quét thư mục CSV."""
-    manifest = os.path.join(config.DATA_DIR, "symbols.json")
-    if os.path.exists(manifest):
-        with open(manifest) as file:
-            return json.load(file)
-    if not os.path.isdir(config.STOCKS_DIR):
-        return []
-    return sorted(name[:-4] for name in os.listdir(config.STOCKS_DIR) if name.endswith(".csv"))
+    return store.current_symbols()
 
 
 def load_market_index() -> pd.DataFrame:
-    if not os.path.exists(config.INDEX_PATH):
-        return pd.DataFrame()
-    return clean_index_data(pd.read_csv(config.INDEX_PATH))
+    return clean_index_data(store.read_bars(store.INDEX_SYMBOL))
 
 
 def load_featured(
@@ -40,11 +29,8 @@ def load_featured(
     feature_set: str = "baseline",
     forward_days: int = config.ML_FORWARD_DAYS,
 ) -> pd.DataFrame:
-    """CSV cache -> clean -> indicators -> features + label. Thiếu/hỏng dữ liệu thì trả rỗng."""
-    path = os.path.join(config.STOCKS_DIR, f"{symbol}.csv")
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    clean = clean_ohlcv_data(pd.read_csv(path))
+    """SQLite -> clean -> indicators -> features + label. Thiếu dữ liệu thì trả rỗng."""
+    clean = clean_ohlcv_data(store.read_bars(symbol))
     indicated = calculate_technical_indicators(clean)
     if indicated is None or "sma_200" not in indicated.columns:
         return pd.DataFrame()

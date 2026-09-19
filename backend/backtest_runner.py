@@ -85,7 +85,7 @@ def main() -> int:
     args = parse_args()
     index_df = load_market_index()
     if index_df.empty:
-        print("Thiếu data/index/VNINDEX.csv — chạy ./run.sh fetch trước.", file=sys.stderr)
+        print("Thiếu VNINDEX trong SQLite — chạy ./run.sh fetch trước.", file=sys.stderr)
         return 1
 
     model_scope = "pooled" if args.pooled else "per_symbol"

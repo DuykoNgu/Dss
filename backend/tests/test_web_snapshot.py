@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -52,6 +52,18 @@ class WebSnapshotTests(unittest.TestCase):
                     clock.now.return_value = datetime(2026, 9, 17, 10, 31, 1, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
                     state.refresh_from_cache()
                     self.assertEqual(state.quotes, {})
+
+    def test_failed_rebuild_keeps_previous_snapshot_visible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "snapshot.json"
+            lock = Path(directory) / "snapshot.lock"
+            with patch("api.snapshot_cache.CACHE_PATH", cache), patch("api.snapshot_cache.LOCK_PATH", lock), \
+                 patch("api.snapshot_cache.source_stamp", return_value=[["data", 1, 2]]):
+                write_snapshot({"date": "2026-09-16", "stocks": [{"symbol": "FPT"}], "history": {}})
+                with patch("api.snapshot_cache.source_stamp", return_value=[["data", 2, 3]]):
+                    snapshot = load_or_build_snapshot(Mock(side_effect=RuntimeError("model error")))
+                self.assertEqual(snapshot["date"], "2026-09-16")
+                self.assertEqual(snapshot["_sync_error"], "model error")
 
 
 if __name__ == "__main__":

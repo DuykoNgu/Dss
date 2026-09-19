@@ -30,6 +30,7 @@ DEFAULT_MODEL_SPEC = {"label_strategy": "fixed", "horizon": config.ML_FORWARD_DA
 
 def model_config() -> dict:
     return {
+        "data_store": "sqlite-validated-v1",
         "features": list(FEATURE_COLUMNS),
         "rf": dict(config.RF_PARAMS),
         "xgb": dict(config.XGB_PARAMS),
