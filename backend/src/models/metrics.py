@@ -49,6 +49,10 @@ def classification_metrics(y_true: Iterable[int], y_pred: Iterable[int]) -> dict
         "buy_precision": float(precision[2]),
         "buy_recall": float(recall[2]),
         "buy_f1": float(f1[2]),
+        **{f"{name.lower()}_support": int(matrix[class_id].sum())
+           for class_id, name in CLASS_NAMES.items()},
+        **{f"{name.lower()}_predicted": int(matrix[:, class_id].sum())
+           for class_id, name in CLASS_NAMES.items()},
         "confusion_matrix": matrix.tolist(),
     }
 

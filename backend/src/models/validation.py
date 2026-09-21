@@ -43,11 +43,14 @@ def walk_forward_validate(
     bằng backtest (so sánh rule/ml/blend, danh mục, rank IC).
     """
     columns = feature_columns or FEATURE_COLUMNS
-    usable = df.dropna(subset=columns + ["label"]).copy()
+    if not 0 < initial_fraction < 1 or not 0 < validation_fraction <= 1 or gap < 0:
+        raise ValueError("Tỷ lệ chia phải trong (0, 1], initial_fraction < 1 và gap >= 0")
+    usable = df.dropna(subset=columns + ["label"]).sort_values("time", kind="stable").copy()
     usable["label"] = usable["label"].map({-1: 0, 0: 1, 1: 2}).astype(int)
     total = len(usable)
-    initial = max(config.MIN_TRAIN_ROWS, int(total * initial_fraction))
-    validation_size = max(1, int(total * validation_fraction))
+    dates = usable["time"].drop_duplicates().to_numpy()
+    initial = max(config.MIN_TRAIN_ROWS, int(len(dates) * initial_fraction))
+    validation_size = max(1, int(len(dates) * validation_fraction))
 
     fold_rows = []
     predictions = []
@@ -55,11 +58,13 @@ def walk_forward_validate(
     baseline_predictions = []
     fold = 0
     train_end = initial
-    while train_end + gap + validation_size <= total:
+    while train_end + gap < len(dates):
         validation_start = train_end + gap
-        validation_end = validation_start + validation_size
-        train = usable.iloc[:train_end]
-        validation = usable.iloc[validation_start:validation_end]
+        validation_end = min(validation_start + validation_size, len(dates))
+        train = usable[usable["time"] < dates[train_end]]
+        validation = usable[usable["time"].isin(dates[validation_start:validation_end])]
+        if "label_end" in train:
+            train = train[train["label_end"] < dates[validation_start]]
         y_true = validation["label"]
         baselines = _baseline_predictions(validation)
         for model, baseline_pred in baselines.items():
@@ -90,12 +95,12 @@ def walk_forward_validate(
             {"fold": fold, "model": "Ensemble50", **classification_metrics(y_true, ensemble_pred)},
         ])
         predictions.extend([
-            {"fold": fold, "model": "RF", "y_true": int(y), "y_pred": int(p)}
-            for y, p in zip(y_true, rf_pred)
+            {"fold": fold, "time": time, "model": "RF", "y_true": int(y), "y_pred": int(p)}
+            for time, y, p in zip(validation["time"], y_true, rf_pred)
         ])
         predictions.extend([
-            {"fold": fold, "model": "XGB", "y_true": int(y), "y_pred": int(p)}
-            for y, p in zip(y_true, xgb_pred)
+            {"fold": fold, "time": time, "model": "XGB", "y_true": int(y), "y_pred": int(p)}
+            for time, y, p in zip(validation["time"], y_true, xgb_pred)
         ])
         ensemble_predictions.extend([
             {"fold": fold, "model": "Ensemble50", "y_true": int(y), "y_pred": int(p)}

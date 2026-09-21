@@ -17,7 +17,8 @@ import numpy as np
 import pandas as pd
 
 import config
-from src.models import predict_ml_scores, train_ml_models
+from src.models import train_ml_models
+from src.models.ml_models import TrainingWeights, predict_ml_probabilities
 from src.scoring import calculate_rule_based_score
 
 TRADING_DAYS_PER_MONTH = 21
@@ -37,7 +38,10 @@ def _purged_history(df: pd.DataFrame, day: pd.Timestamp, horizon: int) -> pd.Dat
     """Dữ liệu train tại close `day`: bỏ các dòng cuối có label còn nhìn vào tương lai,
     và chỉ giữ dòng thuộc rổ tại ngày của dòng đó (nếu có cột in_universe)."""
     past = df[df["time"] <= day]
-    past = past.iloc[: max(0, len(past) - horizon - 1)]
+    if "label_end" in past:
+        past = past[past["label_end"] < day]
+    else:
+        past = past.iloc[: max(0, len(past) - horizon - 1)]
     return past[past["in_universe"]] if "in_universe" in past.columns else past
 
 
@@ -47,6 +51,7 @@ def score_history(
     retrain_every: int = config.BACKTEST_RETRAIN_DAYS,
     pooled: bool = config.ML_POOLED,
     horizon: int = config.ML_FORWARD_DAYS,
+    weighting: TrainingWeights = TrainingWeights(),
 ) -> pd.DataFrame:
     """Điểm Rule/ML/Total của mọi mã cho từng phiên trong `months` tháng cuối."""
     frames = {
@@ -62,20 +67,26 @@ def score_history(
     rows = []
     for block_start in range(0, len(window), retrain_every):
         block = window[block_start:block_start + retrain_every]
+        print(f"[backtest] {pd.Timestamp(block[0]):%Y-%m-%d} "
+              f"({block_start + 1}/{len(window)} phiên)", flush=True)
         # Retrain tại close ngày đầu block, dùng cho cả block
         if pooled:
             history = pd.concat([_purged_history(df, block[0], horizon) for df in frames.values()],
                                 ignore_index=True)
-            shared_models = train_ml_models(history, "POOLED", save=False, verbose=False)
+            shared_models = train_ml_models(history, "POOLED", save=False, verbose=False,
+                                            weighting=weighting)
         for symbol, df in frames.items():
             positions = np.flatnonzero(df["time"].isin(block).to_numpy())
             if len(positions) == 0:
                 continue
             rf, xgb = shared_models if pooled else train_ml_models(
-                _purged_history(df, block[0], horizon), symbol, save=False, verbose=False
+                _purged_history(df, block[0], horizon), symbol, save=False, verbose=False,
+                weighting=weighting
             )
-            ml_scores = predict_ml_scores(df.iloc[positions], rf, xgb)
-            for position, ml_score in zip(positions, ml_scores):
+            signals = predict_ml_probabilities(df.iloc[positions], rf, xgb)
+            ml_scores = np.nan_to_num(50 + 50 * (signals[:, 2] - signals[:, 0]), nan=50)
+            predictions = np.where(np.isfinite(signals).all(axis=1), signals.argmax(axis=1), np.nan)
+            for position, ml_score, prediction in zip(positions, ml_scores, predictions):
                 rule_score, _ = calculate_rule_based_score(df.iloc[: position + 1])
                 row = df.iloc[position]
                 rows.append({
@@ -91,6 +102,9 @@ def score_history(
                     "total_score": rule_score * config.WEIGHT_RULE_BASED
                     + ml_score * config.WEIGHT_ML_MODEL,
                     "future_return": row.get("future_return"),
+                    "label": row.get("label"),
+                    "label_end": row.get("label_end"),
+                    "ml_prediction": prediction,
                 })
     return pd.DataFrame(rows)
 

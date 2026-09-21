@@ -8,6 +8,7 @@ import "./features/discovery/discovery.css";
 import "./features/research/research.css";
 import "./layout.css";
 import "./features/assistant/assistant.css";
+import "./features/onboarding/onboarding.css";
 import "./responsive.css";
 
 createRoot(document.getElementById("root")).render(

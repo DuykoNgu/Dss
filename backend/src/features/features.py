@@ -33,8 +33,9 @@ def build_features_and_labels(
     feature_set: str = "baseline",
 ) -> pd.DataFrame:
     """Mọi feature chỉ dùng quá khứ/hiện tại. Riêng label nhìn tương lai (chỉ để train)."""
-    df = stock_df.copy()
+    df = stock_df.sort_values("time").reset_index(drop=True).copy()
     close = df["close"]
+    df["label_end"] = df["time"].shift(-forward_days)
 
     df["price_vs_sma50"] = (close - df["sma_50"]) / (df["sma_50"].abs() + EPS) * 100
     df["price_vs_sma200"] = (close - df["sma_200"]) / (df["sma_200"].abs() + EPS) * 100
@@ -59,7 +60,7 @@ def build_features_and_labels(
     df["macd_cross_down"] = (df["macd"] < df["macd_signal"]) & (df["macd"].shift(1) >= df["macd_signal"].shift(1))
 
     if index_df is not None and not index_df.empty:
-        idx = index_df.copy()
+        idx = index_df.sort_values("time").copy()
         idx["vnindex_sma50"] = ta.trend.sma_indicator(idx["indexValue"], window=50)
         idx["vnindex_vs_sma50"] = (
             (idx["indexValue"] - idx["vnindex_sma50"]) / (idx["vnindex_sma50"].abs() + EPS) * 100
@@ -67,11 +68,13 @@ def build_features_and_labels(
         idx["vnindex_return_5d"] = idx["indexValue"].pct_change(5) * 100
         idx["vnindex_return_20d"] = idx["indexValue"].pct_change(20) * 100
         idx["vnindex_volatility_20d"] = idx["indexValue"].pct_change().rolling(20).std() * 100
-        # Chỉ dùng cho nhãn "excess" (nhìn tương lai) -> không bao giờ được là feature
-        idx["vnindex_future_return"] = idx["indexValue"].shift(-forward_days) / idx["indexValue"] - 1
+        # Hai lợi nhuận phải có cùng ngày đầu/cuối, kể cả khi thiếu nến.
+        index_prices = idx.set_index("time")["indexValue"]
+        df["vnindex_future_return"] = (
+            df["label_end"].map(index_prices) / df["time"].map(index_prices) - 1
+        )
         df = pd.merge(df, idx[["time", "vnindex_vs_sma50", "vnindex_return_5d",
-                               "vnindex_return_20d", "vnindex_volatility_20d",
-                               "vnindex_future_return"]],
+                               "vnindex_return_20d", "vnindex_volatility_20d"]],
                       on="time", how="left")
         market_columns = ["vnindex_vs_sma50", "vnindex_return_5d",
                           "vnindex_return_20d", "vnindex_volatility_20d"]
@@ -92,6 +95,8 @@ def build_features_and_labels(
     df["label"] = _build_labels(df, forward_days, threshold, label_strategy)
     if feature_set not in {"baseline", "extended"}:
         raise ValueError("feature_set phải là 'baseline' hoặc 'extended'")
+    df.attrs["model_spec"] = {"label_strategy": label_strategy, "horizon": forward_days,
+                              "feature_set": feature_set}
     return df
 
 

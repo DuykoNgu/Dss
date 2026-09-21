@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+from dataclasses import asdict, dataclass
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -28,9 +29,31 @@ DEFAULT_MODEL_SPEC = {"label_strategy": "fixed", "horizon": config.ML_FORWARD_DA
                       "feature_set": "baseline"}
 
 
+@dataclass(frozen=True)
+class TrainingWeights:
+    class_balance: str | None = "balanced"
+    half_life_days: float | None = None
+
+    def __post_init__(self):
+        if self.class_balance not in (None, "balanced"):
+            raise ValueError("class_balance phải là None hoặc balanced")
+        if self.half_life_days is not None and (
+            not np.isfinite(self.half_life_days) or self.half_life_days <= 0
+        ):
+            raise ValueError("half_life_days phải hữu hạn và > 0")
+
+    def temporal_weights(self, dates: pd.Series) -> np.ndarray:
+        if self.half_life_days is None:
+            return np.ones(len(dates))
+        age = (dates.max() - dates).dt.total_seconds() / 86400
+        weights = np.exp2(-age.to_numpy() / self.half_life_days)
+        return weights / weights.mean()
+
+
 def model_config() -> dict:
     return {
         "data_store": "sqlite-validated-v1",
+        "training_semantics": "aligned-label-end-shared-weights-v2",
         "features": list(FEATURE_COLUMNS),
         "rf": dict(config.RF_PARAMS),
         "xgb": dict(config.XGB_PARAMS),
@@ -42,30 +65,48 @@ def model_config() -> dict:
 
 
 def fit_models(x: pd.DataFrame, y: pd.Series, rf_params: dict | None = None,
-               xgb_params: dict | None = None) -> tuple:
-    """Fit RF + XGB với trọng số class cân bằng để model không "lười" đoán GIỮ.
-
-    RF dùng class_weight trong params, XGB dùng sample_weight. y phải có đủ 3 class.
-    """
-    weights = compute_class_weight(class_weight="balanced", classes=np.array(CLASSES), y=y)
-    rf = RandomForestClassifier(**(rf_params or config.RF_PARAMS)).fit(x, y)
-    xgb = XGBClassifier(**(xgb_params or config.XGB_PARAMS))
-    xgb.fit(x, y, sample_weight=weights[y.to_numpy()])
+               xgb_params: dict | None = None,
+               sample_weight: np.ndarray | None = None) -> tuple:
+    """RF và XGB dùng cùng trọng số mẫu; chỉ hiệu chỉnh phần trọng số lớp khi predict."""
+    rf_options = {**config.RF_PARAMS, **(rf_params or {})}
+    balance = rf_options.pop("class_weight", None)
+    temporal = np.ones(len(y)) if sample_weight is None else np.asarray(sample_weight, dtype=float)
+    if temporal.shape != (len(y),) or not np.isfinite(temporal).all() or (temporal <= 0).any():
+        raise ValueError("sample_weight phải dương, hữu hạn và có cùng số dòng với y")
+    class_weights = compute_class_weight(
+        class_weight=balance, classes=np.array(CLASSES), y=y, sample_weight=temporal
+    )
+    weights = temporal * class_weights[y.to_numpy()]
+    weights /= weights.mean()
+    rf = RandomForestClassifier(**rf_options).fit(x, y, sample_weight=weights)
+    xgb = XGBClassifier(**{**config.XGB_PARAMS, **(xgb_params or {})})
+    xgb.fit(x, y, sample_weight=weights)
+    priors = np.bincount(y, weights=temporal, minlength=len(CLASSES)) / temporal.sum()
+    for model in (rf, xgb):
+        model.class_priors_ = dict(enumerate(priors))
+        model.class_weight_correction_ = 1.0 / class_weights
     return rf, xgb
 
 
-def _print_holdout_metrics(train_df: pd.DataFrame, y: pd.Series, symbol: str) -> None:
-    """Metric tham khảo: train model phụ trên 80% thời gian đầu (purge T+5), test 20% cuối."""
+def _print_holdout_metrics(train_df: pd.DataFrame, y: pd.Series, symbol: str,
+                           weighting: TrainingWeights) -> None:
+    """Metric tham khảo trên 20% cuối, purge theo ngày kết thúc nhãn."""
     dates = np.sort(train_df["time"].unique())
     split = int(len(dates) * (1 - config.TEST_SIZE_RATIO))
-    purge_start = dates[max(0, split - config.ML_FORWARD_DAYS)]
+    horizon = train_df.attrs.get("model_spec", DEFAULT_MODEL_SPEC)["horizon"]
+    purge_start = dates[max(0, split - horizon)]
     in_train = (train_df["time"] < purge_start).to_numpy()
     in_test = (train_df["time"] >= dates[split]).to_numpy()
+    if "label_end" in train_df:
+        in_train &= (train_df["label_end"] < dates[split]).to_numpy()
     if not in_test.any() or not set(CLASSES).issubset(y[in_train].unique()):
         print(f"[{symbol}] Không đủ dữ liệu để tính metric holdout.")
         return
     x = train_df[FEATURE_COLUMNS]
-    rf, xgb = fit_models(x[in_train], y[in_train])
+    rf, xgb = fit_models(
+        x[in_train], y[in_train], rf_params={"class_weight": weighting.class_balance},
+        sample_weight=weighting.temporal_weights(train_df.loc[in_train, "time"]),
+    )
     for name, model in (("RF", rf), ("XGB", xgb)):
         metrics = classification_metrics(y[in_test], model.predict(x[in_test]))
         print(f"[{symbol}] {name} holdout ({in_test.sum()} dòng): {format_metrics(metrics)}")
@@ -76,6 +117,7 @@ def train_ml_models(
     symbol: str,
     save: bool = True,
     verbose: bool = True,
+    weighting: TrainingWeights = TrainingWeights(),
 ) -> tuple:
     """Train RF + XGB trên TOÀN BỘ dòng có label để model dùng cả dữ liệu mới nhất.
 
@@ -100,14 +142,18 @@ def train_ml_models(
         return None, None
 
     if verbose and "time" in train_df.columns:
-        _print_holdout_metrics(train_df, y, symbol)
+        _print_holdout_metrics(train_df, y, symbol, weighting)
 
-    rf, xgb = fit_models(train_df[FEATURE_COLUMNS], y)
-    class_priors = y.value_counts(normalize=True).reindex(CLASSES, fill_value=0.0).to_dict()
+    dates = train_df["time"] if "time" in train_df else pd.Series(pd.Timestamp("1970-01-01"), index=train_df.index)
+    rf, xgb = fit_models(
+        train_df[FEATURE_COLUMNS], y,
+        rf_params={"class_weight": weighting.class_balance},
+        sample_weight=weighting.temporal_weights(dates),
+    )
     data_end = df["time"].max() if "time" in df.columns else None
     spec = df.attrs.get("model_spec", DEFAULT_MODEL_SPEC)
     for model in (rf, xgb):
-        model.class_priors_ = class_priors
+        model.weighting_ = asdict(weighting)
         model.feature_columns_ = list(FEATURE_COLUMNS)
         model.data_end_ = data_end
         model.spec_ = spec
@@ -156,25 +202,33 @@ def model_is_stale(model, data_end: pd.Timestamp, spec: dict | None = None) -> b
 
 def _class_signals(features: pd.DataFrame, rf, xgb) -> np.ndarray:
     signals = (rf.predict_proba(features) + xgb.predict_proba(features)) / 2.0
+    correction = getattr(rf, "class_weight_correction_", None)
     class_priors = getattr(rf, "class_priors_", None) or getattr(xgb, "class_priors_", None)
-    if class_priors:
-        signals *= np.array([class_priors.get(c, BALANCED_PRIOR) / BALANCED_PRIOR for c in CLASSES])
+    if correction is None and class_priors:
+        correction = np.array([class_priors.get(c, BALANCED_PRIOR) / BALANCED_PRIOR for c in CLASSES])
+    if correction is not None:
+        signals *= correction
         signals /= signals.sum(axis=1, keepdims=True)
+    return signals
+
+
+def predict_ml_probabilities(rows: pd.DataFrame, rf, xgb) -> np.ndarray:
+    """Tín hiệu ba lớp sau hiệu chỉnh; NaN đánh dấu thiếu model hoặc feature."""
+    signals = np.full((len(rows), len(CLASSES)), np.nan)
+    if rf is None or xgb is None or rows.empty:
+        return signals
+    features = rows[FEATURE_COLUMNS]
+    valid = features.notna().all(axis=1).to_numpy()
+    if valid.any():
+        signals[valid] = _class_signals(features[valid], rf, xgb)
     return signals
 
 
 def predict_ml_scores(rows: pd.DataFrame, rf, xgb) -> np.ndarray:
     """Điểm = 50 + 50 × (tín hiệu lớp vượt chỉ số - lớp kém chỉ số)."""
-    scores = np.full(len(rows), NEUTRAL_SCORE)
-    if rf is None or xgb is None or rows.empty:
-        return scores
-    features = rows[FEATURE_COLUMNS]
-    valid = features.notna().all(axis=1).to_numpy()
-    if not valid.any():
-        return scores
-    signals = _class_signals(features[valid], rf, xgb)
-    scores[valid] = NEUTRAL_SCORE + 50.0 * (signals[:, BUY_CLASS] - signals[:, SELL_CLASS])
-    return scores
+    signals = predict_ml_probabilities(rows, rf, xgb)
+    return np.nan_to_num(NEUTRAL_SCORE + 50 * (signals[:, BUY_CLASS] - signals[:, SELL_CLASS]),
+                         nan=NEUTRAL_SCORE)
 
 
 def explain_ml_score(row: pd.DataFrame, rf, xgb) -> dict | None:

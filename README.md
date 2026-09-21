@@ -321,6 +321,9 @@ vnindex_volatility_20d, relative_strength_5d
 
 Tat ca feature chi dung thong tin qua khu/hien tai. `future_return` chi dung
 de tao label va khong duoc dua vao `FEATURE_COLUMNS`.
+`label_end` luu ngay ket thuc nhan sau N nen hop le cua co phieu. Nhan `excess`
+lay VNINDEX tai dung ngay dau va ngay `label_end`; thieu mot trong hai gia thi
+bo nhan, khong dien gia tuong lai. `label_end` khong phai feature.
 
 Bon chien luoc label (tam nhin N mac dinh 5, doi bang `--horizon` o evaluate/backtest):
 
@@ -450,9 +453,10 @@ tham khao va luu model vao `backend/models/`.
 
 Quy trinh nay dung expanding window:
 
-- Initial train: 50% so dong usable.
-- Moi fold validation: 10%.
+- Initial train: 50% so ngay usable (toi thieu 100 ngay).
+- Moi fold validation: 10% so ngay; fold cuoi lay ca phan du.
 - Purge gap: 5 phien.
+- Cac ma cung ngay nam cung fold; loai them dong co `label_end` cham validation.
 - Khong shuffle.
 - Bao cao RF, XGB va Ensemble 50/50.
 - Bao cao them `BaselineHold` (luon doan HOLD) va `BaselineMomentum` (dung
@@ -483,8 +487,9 @@ Day chi la nguong tham khao, khong phai tieu chuan bao dam loi nhuan. HOLD
 chiem da so nhan fixed, nen Accuracy co the bi danh lua. Xem
 [REPORT_METRICS.md](REPORT_METRICS.md) de biet cach doc confusion matrix.
 
-Snapshot walk-forward hien tai (du lieu 8 nam, 29 ma co du dong de tao fold;
-trung binh theo ma cua dong `aggregate`):
+Snapshot walk-forward cu, truoc khi sua lich nhan va fold cuoi (du lieu 8 nam,
+29 ma; trung binh theo ma cua dong `aggregate`). Khong dung bang nay de ket luan
+ve code hien tai; doi chung moi duoc ghi rieng trong [WEIGHTING_EXPERIMENT.md](WEIGHTING_EXPERIMENT.md).
 
 | Cau hinh | Model | Balanced Acc | Macro F1 | BUY P / R | SELL P / R |
 |---|---|---:|---:|---:|---:|
@@ -574,6 +579,32 @@ Voi `--universe history`:
 Khi HOSE cong bo ky xet duyet moi (thang 1, thang 7) hoac thay the bat thuong,
 them dong vao file nay; test se bao loi neu ro khong con du 30 ma.
 
+### Doi chung trong so tren du lieu da lam sach (22/09/2026)
+
+Da sua nhan excess de so sanh dung cung ngay ket thuc, purge theo `label_end`,
+va walk-forward danh gia ca fold cuoi. Doi chung pooled excess T+20, VN30 theo
+lich su, 25/08/2020–17/09/2026, retrain 60 phien, 5 slot va cung phi/luat giao
+dich; RF/XGB nhan cung trong so mau. Decay co chu ky giam mot nua 2 nam.
+
+| Balancing | Decay | BUY precision / recall tai diem >=60 | Rank IC | Loi nhuan rong ca ky | Max drawdown |
+|---|---|---:|---:|---:|---:|
+| Co | Khong | 36,54% / 10,82% | +0,0701 | +109,66% | -49,77% |
+| Khong | Khong | 36,77% / 10,67% | **+0,0733** | +205,25% | -49,59% |
+| Co | 2 nam | 36,06% / 11,16% | +0,0659 | +170,81% | -42,93% |
+| Khong | 2 nam | 36,95% / 11,32% | +0,0640 | **+233,09%** | **-41,47%** |
+
+Benchmark equal-weight khong phi +139,92%, VNINDEX +108,53%. Ket hop khong
+balancing voi decay dan dau loi nhuan/rui ro toan ky, nhung rieng 2024–09/2026 khong decay
+lai cao hon (+102,66% so voi +84,83%). Day la doi chung tren lich su da xem,
+chua phai holdout moi va chua doi mac dinh website. BUY precision do dung nhan
+vuot VNINDEX, khong phai ty le giao dich co lai.
+
+Chay lai: `python3 backend/weighting_experiment.py`. Ket qua, bang tung nam,
+metric phan lop va gioi han: [WEIGHTING_EXPERIMENT.md](WEIGHTING_EXPERIMENT.md).
+51 unit test dat; evaluate excess T+20 FPT/ACB co 5 fold moi ma den mau co
+nhan cuoi 17/08/2026. Artifact rieng trong
+`backend/reports/weighting_ablation_20260922/`.
+
 ### Ket qua tham chieu truoc chuyen doi
 
 **Luu y:** bang ket qua ben duoi duoc tinh truoc khi chuyen sang SQLite va loai
@@ -581,7 +612,7 @@ nen OHLC sai; chi giu lam moc tham chieu, khong phai metric cua du lieu hien tai
 Chay lai lenh backtest ben duoi de co ket qua moi. Giao dien an metric nghien cuu
 cu cho den khi bao cao duoc tao lai sau lan cap nhat du lieu.
 
-Kiem tra sau chuyen doi tren FPT/ACB: walk-forward `fixed` co 4 fold moi ma;
+Kiem tra truoc khi sua fold cuoi tren FPT/ACB: walk-forward `fixed` co 4 fold moi ma;
 backtest pooled `fixed` T+5 trong 6 thang (18/03–17/09/2026) cho danh muc
 `rule` -2,05%, `blend` -3,44%, `ml` +0,13% (Rank IC `ml` +0,008).
 Day la kiem tra luong du lieu hai ma, khong thay the bao cao VN30 72 thang.

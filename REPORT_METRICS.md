@@ -95,8 +95,9 @@ trên một fold hoặc dòng aggregate.
 | `fold` | Số thứ tự fold; `aggregate` là gộp các fold của mã |
 | `model` | RF, XGB, Ensemble hoặc baseline |
 
-Fold được tạo theo expanding walk-forward: train trên quá khứ, bỏ qua purge gap
-T+5, rồi đánh giá trên đoạn thời gian kế tiếp. Không shuffle dữ liệu.
+Fold được tạo theo expanding walk-forward trên ngày, giữ các mã cùng ngày trong
+cùng fold. Purge gap bằng horizon (mặc định T+5), kiểm tra thêm `label_end` đứng
+trước validation và đánh giá cả phần dư cuối dữ liệu. Không shuffle dữ liệu.
 
 ### Metric tổng quát
 
@@ -119,6 +120,12 @@ Các cột có tiền tố `sell_`, `hold_` và `buy_` có cùng cách hiểu:
 | `precision` | Trong các lần model dự đoán class đó, tỷ lệ dự đoán đúng |
 | `recall` | Trong các mẫu thực sự thuộc class đó, tỷ lệ model bắt được |
 | `f1` | Trung bình điều hòa của precision và recall |
+| `support` | Số mẫu thực tế thuộc lớp này |
+| `predicted` | Số lần model dự đoán lớp này |
+
+Metric không xác định vẫn được ghi 0 theo `zero_division=0`. Đọc cùng `support`
+và `predicted`; khi chỉ có HOLD, balanced accuracy có thể đạt 1 trong khi
+macro F1 trên ba lớp chỉ đạt 1/3. Không loại fold chỉ vì thiếu BUY/SELL.
 
 Ví dụ:
 
@@ -300,3 +307,25 @@ Một model hoặc label strategy chỉ nên được xem là ứng viên tốt 
 Metric phân loại chỉ đo khả năng dự đoán label. Nó không tự chứng minh chiến
 lược có lợi nhuận. Kết luận cuối cần đối chiếu với backtest, số lệnh, exposure,
 chi phí và giai đoạn thị trường được đánh giá.
+
+## 12. Đối chứng trọng số pooled
+
+`python3 backend/weighting_experiment.py` chạy bốn tổ hợp balancing/decay trên
+cùng pooled excess T+20 và luật danh mục. Kết quả vào thư mục mới
+`backend/reports/weighting_ablation_<timestamp>/`, không ghi đè các report cũ.
+
+| Artifact | Nội dung |
+|---|---|
+| `manifest.json` | Tham số, thư viện, hash dữ liệu/source và giới hạn nghiên cứu |
+| `data_coverage.csv` | Số dòng có dữ liệu, thuộc rổ, đủ feature/nhãn cho từng mã |
+| `summary.csv` | Bốn cấu hình: phân loại, tín hiệu, IC, lợi nhuận, drawdown và thời gian chạy |
+| `<variant>/scores.csv` | Điểm theo ngày, `label`, `label_end`, `ml_prediction` class 0/1/2 |
+| `<variant>/daily_rank_ic.csv` | Chuỗi IC từng ngày |
+| `<variant>/by_year.csv` | IC và lợi nhuận danh mục theo năm |
+| `<variant>/equity.csv`, `trades.csv` | Equity liên tục và các giao dịch đã đóng |
+
+`class_*` dùng argmax sau hiệu chỉnh trọng số lớp, khác ensemble argmax thô
+trong evaluate. `signal_buy_precision/recall` đánh giá ngưỡng điểm mua 60;
+`buy_signals` đếm mã–ngày, còn `num_trades` đếm lệnh danh mục đã đóng.
+BUY precision đo đúng nhãn excess, không phải win rate giao dịch.
+Chi tiết và kết quả lần chạy được lưu ở [WEIGHTING_EXPERIMENT.md](WEIGHTING_EXPERIMENT.md).

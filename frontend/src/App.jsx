@@ -7,6 +7,9 @@ import StockAnalysisDialog from "./features/market/StockAnalysisDialog";
 import Discovery from "./features/discovery/Discovery";
 import Research from "./features/research/Research";
 import ChatWidget from "./features/assistant/ChatWidget";
+import Onboarding from "./features/onboarding/Onboarding";
+
+const PROFILE_KEY = "dss-investor-profile";
 
 export default function App() {
   const [market, setMarket] = useState(null);
@@ -14,6 +17,13 @@ export default function App() {
   const [error, setError] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try {
+      return !localStorage.getItem(PROFILE_KEY);
+    } catch {
+      return true;
+    }
+  });
   useEffect(() => {
     const controller = new AbortController();
     let timer;
@@ -55,6 +65,22 @@ export default function App() {
   function choose(symbol) {
     setSelectedSymbol(symbol);
     setChatOpen(false);
+  }
+  function completeOnboarding(profile) {
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    } catch {
+      // The dashboard still works when browser storage is unavailable.
+    }
+    setShowOnboarding(false);
+  }
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        onComplete={completeOnboarding}
+        onSkip={() => completeOnboarding({ skipped: true })}
+      />
+    );
   }
   return (
     <>

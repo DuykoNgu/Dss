@@ -211,6 +211,10 @@ còn lại                   -> HOLD
 Nhãn này loại phần biến động chung của thị trường, để model học chọn mã tốt
 hơn mặt bằng thay vì đoán hướng thị trường. `vnindex_future_return` nhìn tương
 lai nên chỉ dùng tạo nhãn, không nằm trong feature.
+`label_end` là ngày sau N nến hợp lệ của cổ phiếu. Lợi nhuận VNINDEX được tra
+theo đúng ngày đầu và ngày kết thúc đó, không shift riêng trên lịch chỉ số.
+Thiếu giá VNINDEX tại một đầu mút thì nhãn excess là NaN. `label_end` cũng không
+được dùng làm feature; backtest chỉ train khi `label_end` đứng trước ngày chấm điểm.
 
 Mọi nhãn nhận tầm nhìn `N` qua `--horizon` (mặc định 5); purge gap của
 walk-forward và backtest dùng cùng `N`.
@@ -252,8 +256,8 @@ phụ trên 80% thời gian đầu (bỏ 5 phiên ở ranh giới) và in metric
 `walk_forward_validate()` dùng:
 
 ```text
-initial train: 50% usable rows
-validation mỗi fold: 10%
+initial train: 50% ngày usable, tối thiểu 100 ngày
+validation mỗi fold: 10% số ngày; fold cuối nhận phần dư
 purge gap: 5 phiên
 ```
 
@@ -265,6 +269,8 @@ purge gap: 5 phiên
 
 Train set mở rộng dần và validation luôn nằm sau train. Purge gap loại bỏ các
 mẫu sát ranh giới có label còn nhìn vào vùng validation.
+Các mã cùng ngày luôn nằm trong cùng fold. Nếu có `label_end`, kiểm tra thêm
+ngày kết thúc nhãn phải đứng trước validation, kể cả khi lịch nến bị thiếu.
 
 ## 8. Baseline trước khi đánh giá model
 
@@ -333,9 +339,14 @@ liệu tài chính nhiễu.
 
 ### 9.3. Class imbalance
 
-HOLD thường chiếm nhiều hơn BUY và SELL. RF dùng `class_weight="balanced"`,
-XGBoost dùng `sample_weight`, validation báo cáo metric riêng cho từng class và
-BaselineHold được tính để phát hiện accuracy giả.
+HOLD thường chiếm nhiều hơn BUY và SELL. `fit_models` tính một bộ `sample_weight`
+chung cho RF và XGBoost; bỏ `class_weight` trong constructor RF để không nhân hai
+lần. Mặc định vẫn balanced. Tham số RF tùy chỉnh được gộp vào mặc định.
+`TrainingWeights` cho phép đối chứng không balancing và giảm trọng số theo tuổi
+dữ liệu. Khi kết hợp, balancing tính từ tần suất lớp đã có trọng số thời gian;
+trọng số mẫu cuối được chuẩn hóa về trung bình 1.
+Validation báo cáo precision/recall cùng số mẫu thật (`support`) và số dự đoán
+(`predicted`) của mỗi lớp. Lớp vắng mặt vẫn theo quy ước `zero_division=0`.
 
 Nếu training window thiếu class, model được bỏ qua an toàn và ML score trở về
 neutral thay vì crash hoặc tạo model không đầy đủ.
@@ -349,12 +360,14 @@ RF và XGBoost trả về `P(SELL), P(HOLD), P(BUY)`. Production lấy trung bì
 
 ```text
 P_ensemble = (P_RF + P_XGB) / 2
-P_corrected(c) ∝ P_ensemble(c) × prior_train(c) / (1/3)
+P_corrected(c) ∝ P_ensemble(c) / class_weight(c)
 ML score = 50 + 50 × (P_corrected(BUY) − P_corrected(SELL))
 ```
 
-Do train có class balancing, prior của train được lưu vào model và dùng để hiệu
-chỉnh xác suất. ML score cùng thang với Rule score: `50` là trung tính. Không
+Với balanced, phép hiệu chỉnh tương đương nhân prior_train(c)/(1/3); prior này
+đã tính trọng số thời gian nếu có decay. Không balancing thì không hiệu chỉnh
+theo prior. Model lưu `class_weight_correction_` và `weighting_` để phân biệt.
+ML score cùng thang với Rule score: `50` là trung tính. Không
 dùng `P(BUY) × 100` vì BUY chỉ chiếm ~20% nhãn, điểm đó gần như luôn thấp và kéo
 tổng điểm xuống. Nếu thiếu model hoặc feature hiện tại có NaN, ML score là `50`.
 Đây là score phục vụ decision, không phải xác suất lợi nhuận đã calibration đầy đủ.
