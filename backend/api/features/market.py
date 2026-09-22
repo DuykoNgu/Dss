@@ -209,10 +209,12 @@ class MarketState:
         self.snapshot = snapshot
         self.quotes: dict[str, dict] = {}
         self.lock = threading.Lock()
+        self.sync_lock = threading.Lock()
         self.cache_mtime = 0
         self.quote_status = "closed"
         self.quote_as_of = None
         self.sync_error = snapshot.get("_sync_error")
+        self.requested_session_date = None
 
     def market(self) -> dict:
         with self.lock:
@@ -283,6 +285,14 @@ class MarketState:
             LOGGER.info("Quote status=%s coverage=%d/%d", status, len(quotes), len(symbols))
 
     def sync_daily(self) -> bool:
+        if not self.sync_lock.acquire(blocking=False):
+            return False
+        try:
+            return self._sync_daily()
+        finally:
+            self.sync_lock.release()
+
+    def _sync_daily(self) -> bool:
         index = fetch_market_index()
         if index.empty or index["time"].max().date().isoformat() <= self.snapshot["date"]:
             LOGGER.info("VNINDEX chưa có nến đóng mới hơn %s", self.snapshot["date"])
@@ -299,6 +309,29 @@ class MarketState:
             self.sync_error = None
         LOGGER.info("Đồng bộ dữ liệu ngày %s hoàn tất với %d mã", session_date, len(symbols))
         return True
+
+    def request_session_sync(self, session_date: str) -> None:
+        try:
+            requested_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+        except ValueError as error:
+            raise ValueError("Ngày phiên giao dịch không hợp lệ.") from error
+        if requested_date > datetime.now(VN_TZ).date():
+            raise ValueError("Không thể đồng bộ phiên trong tương lai.")
+        with self.lock:
+            if (session_date <= self.snapshot["date"]
+                    or session_date == self.requested_session_date):
+                return
+            self.requested_session_date = session_date
+        threading.Thread(target=self._sync_requested_session, daemon=True).start()
+
+    def _sync_requested_session(self) -> None:
+        try:
+            if self.sync_daily():
+                self.publish()
+        except Exception as error:
+            with self.lock:
+                self.sync_error = str(error)
+            LOGGER.exception("Không cập nhật được phiên người dùng yêu cầu")
 
     def run(self, stop: threading.Event) -> None:
         next_sync_at = None
@@ -328,6 +361,9 @@ class MarketState:
 
 
 def get_market(state: MarketState, query: dict) -> dict:
+    requested_date = query.get("session_date", [""])[0]
+    if requested_date:
+        state.request_session_sync(requested_date)
     return state.market()
 
 

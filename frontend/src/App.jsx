@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { getMarket } from "./common/api";
+import { latestClosedSessionDate } from "./common/marketSession";
 import Header from "./common/Header";
 import MarketBoard from "./features/market/MarketBoard";
 import StockAnalysisDialog from "./features/market/StockAnalysisDialog";
@@ -32,7 +33,10 @@ export default function App() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const result = await getMarket(controller.signal);
+        const result = await getMarket(
+          latestClosedSessionDate(),
+          controller.signal,
+        );
         setMarket(result);
         setError("");
       } catch (reason) {

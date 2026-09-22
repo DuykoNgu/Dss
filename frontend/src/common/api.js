@@ -12,8 +12,9 @@ async function getJson(path, options) {
   return body;
 }
 
-export function getMarket(signal) {
-  return getJson("/api/market", { signal }).then((market) => {
+export function getMarket(sessionDate, signal) {
+  const query = new URLSearchParams({ session_date: sessionDate });
+  return getJson(`/api/market?${query}`, { signal }).then((market) => {
     if (
       market.contract_version !== 1 ||
       !Array.isArray(market.stocks) ||

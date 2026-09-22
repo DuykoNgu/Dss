@@ -106,6 +106,16 @@ cmd_web() {
     cd "$BACKEND_DIR" && python3 -m api.server "$@"
 }
 
+cmd_dev() {
+    print_header "Chạy Frontend + Backend"
+    activate_venv
+    [ -d "$FRONTEND_DIR/node_modules" ] || (cd "$FRONTEND_DIR" && npm ci --no-audit --no-fund)
+    (cd "$BACKEND_DIR" && python3 -m api.server) &
+    backend_pid=$!
+    trap 'kill "$backend_pid" 2>/dev/null || true' EXIT INT TERM
+    cd "$FRONTEND_DIR" && npm run dev
+}
+
 build_web() {
     activate_venv
     if ! command -v npm >/dev/null 2>&1; then
@@ -339,6 +349,7 @@ cmd_help() {
     echo -e "  ${CYAN}evaluate${NC}     Label distribution + metrics + confusion matrix"
     echo -e "  ${CYAN}tune${NC}         So sánh cấu hình RF/XGBoost bằng walk-forward"
     echo -e "  ${CYAN}web${NC}          Build React và mở bảng giá VN30 tại localhost:8765"
+    echo -e "  ${CYAN}dev${NC}          Chạy frontend + backend để phát triển tại localhost:5173"
     echo -e "  ${CYAN}web-balanced${NC} Build React, chạy producer và 2 ASGI worker tại localhost:8765"
     echo -e "  ${CYAN}status${NC}       Kiểm tra trạng thái dự án (data, models, files)"
     echo -e "  ${CYAN}clear-data${NC}   Xóa SQLite và CSV cũ, giữ models"
@@ -369,6 +380,7 @@ case "${1:-help}" in
     evaluate) shift; cmd_evaluate "$@" ;;
     tune)     shift; cmd_tune "$@" ;;
     web)      shift; cmd_web "$@" ;;
+    dev)      cmd_dev ;;
     web-balanced) cmd_web_balanced ;;
     clear-data) cmd_clear_data "$2" ;;
     clean)    cmd_clean ;;

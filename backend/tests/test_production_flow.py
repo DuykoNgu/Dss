@@ -77,6 +77,19 @@ class ProductionFlowTests(unittest.TestCase):
         self.assertEqual(members.call_args.args[1], pd.Timestamp("2026-09-17"))
         self.assertEqual(state.snapshot["date"], "2026-09-17")
 
+    def test_newer_requested_session_starts_one_background_sync(self):
+        state = MarketState({"date": "2026-09-17", "stocks": [], "history": {}})
+        with patch("api.features.market.threading.Thread") as thread:
+            state.request_session_sync("2026-09-18")
+            state.request_session_sync("2026-09-18")
+        thread.assert_called_once_with(target=state._sync_requested_session, daemon=True)
+        thread.return_value.start.assert_called_once()
+
+    def test_future_requested_session_is_rejected(self):
+        state = MarketState({"date": "2026-09-17", "stocks": [], "history": {}})
+        with self.assertRaisesRegex(ValueError, "tương lai"):
+            state.request_session_sync("2999-01-01")
+
     def test_startup_checks_for_closed_session_before_market_opens(self):
         state = MarketState({"date": "2026-09-16", "stocks": [], "history": {}})
         stop = Mock()

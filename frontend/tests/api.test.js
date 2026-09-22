@@ -16,7 +16,7 @@ test("frontend calls the backend routes with the expected payload", async () => 
     return {
       ok: true,
       json: async () =>
-        path === "/api/market"
+        path.startsWith("/api/market?")
           ? {
               contract_version: 1,
               stocks: [],
@@ -33,7 +33,7 @@ test("frontend calls the backend routes with the expected payload", async () => 
   };
 
   try {
-    await getMarket();
+    await getMarket("2026-09-18");
     await getHistory("FPT");
     await getRecommendation("HPG");
     await getProfitLoss({
@@ -50,7 +50,7 @@ test("frontend calls the backend routes with the expected payload", async () => 
   assert.deepEqual(
     calls.map(({ path }) => path),
     [
-      "/api/market",
+      "/api/market?session_date=2026-09-18",
       "/api/history?symbol=FPT",
       "/api/recommend?symbol=HPG",
       "/api/profit-loss",
@@ -76,7 +76,10 @@ test("market rejects incompatible API response", async () => {
     json: async () => ({ stocks: [] }),
   });
   try {
-    await assert.rejects(getMarket(), /không đúng phiên bản API/);
+    await assert.rejects(
+      getMarket("2026-09-18"),
+      /không đúng phiên bản API/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
