@@ -12,6 +12,26 @@ BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 VENV_DIR="$PROJECT_DIR/.venv"
 
+
+find_python() {
+    if command -v python3 >/dev/null 2>&1; then
+        echo "python3"
+    elif command -v python >/dev/null 2>&1; then
+        echo "python"
+    else
+        echo ""
+    fi
+}
+
+SYSTEM_PYTHON="$(find_python)"
+
+if [ -z "$SYSTEM_PYTHON" ]; then
+    echo -e "${RED}❌ Không tìm thấy Python.${NC}"
+    echo "Hãy cài Python 3.9+ và thêm Python vào PATH."
+    exit 1
+fi
+
+
 # ── Màu sắc ──
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -30,29 +50,52 @@ print_header() {
 
 # ── Kích hoạt venv nếu có ──
 activate_venv() {
-    if [ -d "$VENV_DIR" ]; then
+    if [ -f "$VENV_DIR/Scripts/activate" ]; then
+        # Windows / Git Bash
+        source "$VENV_DIR/Scripts/activate"
+    elif [ -f "$VENV_DIR/bin/activate" ]; then
+        # Linux / macOS
         source "$VENV_DIR/bin/activate"
-    elif [ -d "$HOME/.venv" ]; then
+    elif [ -f "$HOME/.venv/Scripts/activate" ]; then
+        # Windows fallback
+        source "$HOME/.venv/Scripts/activate"
+    elif [ -f "$HOME/.venv/bin/activate" ]; then
+        # Linux/macOS fallback
         source "$HOME/.venv/bin/activate"
+    else
+        echo -e "${RED}❌ Không tìm thấy virtual environment.${NC}"
+        return 1
     fi
 }
-
 # ═══════════════ COMMANDS ═══════════════
 
 cmd_setup() {
     print_header "Setup Môi Trường"
 
+    echo -e "🐍 Python: ${CYAN}$SYSTEM_PYTHON${NC}"
+    "$SYSTEM_PYTHON" --version
+
     # Tạo venv nếu chưa có
     if [ ! -d "$VENV_DIR" ]; then
         echo -e "${YELLOW}📦 Tạo virtual environment...${NC}"
-        python3 -m venv "$VENV_DIR"
+        "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
     fi
 
-    source "$VENV_DIR/bin/activate"
+    # Kiểm tra venv
+    if [ -f "$VENV_DIR/Scripts/python.exe" ]; then
+        VENV_PYTHON="$VENV_DIR/Scripts/python.exe"
+    elif [ -f "$VENV_DIR/bin/python" ]; then
+        VENV_PYTHON="$VENV_DIR/bin/python"
+    else
+        echo -e "${RED}❌ Không tìm thấy Python trong .venv${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}📦 Cập nhật pip...${NC}"
+    "$VENV_PYTHON" -m pip install --upgrade pip
 
     echo -e "${YELLOW}📦 Cài thư viện...${NC}"
-    pip install --upgrade pip
-    pip install -r "$BACKEND_DIR/requirements.txt"
+    "$VENV_PYTHON" -m pip install -r "$BACKEND_DIR/requirements.txt"
 
     echo -e "${YELLOW}📁 Tạo thư mục...${NC}"
     mkdir -p "$BACKEND_DIR/data/stocks"
@@ -69,7 +112,7 @@ cmd_fetch() {
     activate_venv
 
     echo -e "${YELLOW}📡 Đang đồng bộ rổ VN30 (lần đầu ~4 phút do giới hạn quota API)...${NC}"
-    python3 "$BACKEND_DIR/main.py" --fetch-only "$@"
+    "$VENV_PYTHON" "$BACKEND_DIR/main.py" --fetch-only "$@"
 
     echo ""
     echo -e "${GREEN}${BOLD}✅ Tải dữ liệu hoàn tất!${NC}"
@@ -80,7 +123,7 @@ cmd_dss() {
     print_header "Chạy Pipeline DSS"
     activate_venv
 
-    python3 "$BACKEND_DIR/main.py" "$@"
+    "$VENV_PYTHON" "$BACKEND_DIR/main.py" "$@"
 }
 
 cmd_backtest() {
@@ -92,25 +135,25 @@ cmd_backtest() {
         exit 1
     fi
 
-    python3 "$BACKEND_DIR/backtest_runner.py" "$@"
+    "$VENV_PYTHON" "$BACKEND_DIR/backtest_runner.py" "$@"
 }
 
 cmd_test() {
     print_header "Unit Test"
     activate_venv
-    cd "$BACKEND_DIR" && python3 -m unittest discover -s tests "$@"
+    cd "$BACKEND_DIR" && "$VENV_PYTHON" -m unittest discover -s tests "$@"
 }
 
 cmd_web() {
     build_web
-    cd "$BACKEND_DIR" && python3 -m api.server "$@"
+    cd "$BACKEND_DIR" && "$VENV_PYTHON" -m api.server "$@"
 }
 
 cmd_dev() {
     print_header "Chạy Frontend + Backend"
     activate_venv
     [ -d "$FRONTEND_DIR/node_modules" ] || (cd "$FRONTEND_DIR" && npm ci --no-audit --no-fund)
-    (cd "$BACKEND_DIR" && python3 -m api.server) &
+    (cd "$BACKEND_DIR" && "$VENV_PYTHON" -m api.server) &
     backend_pid=$!
     trap 'kill "$backend_pid" 2>/dev/null || true' EXIT INT TERM
     cd "$FRONTEND_DIR" && npm run dev
@@ -131,29 +174,29 @@ build_web() {
 cmd_web_balanced() {
     build_web
     cd "$BACKEND_DIR" || return 1
-    python3 -m api.server --build-only || return 1
-    python3 -m api.server --producer-only &
+    "$VENV_PYTHON" -m api.server --build-only || return 1
+    "$VENV_PYTHON" -m api.server --producer-only &
     producer_pid=$!
     trap 'kill "$producer_pid" 2>/dev/null || true' EXIT INT TERM
-    python3 -m api.server --worker --workers 2 --port 8765
+    "$VENV_PYTHON" -m api.server --worker --workers 2 --port 8765
 }
 
 cmd_smoke() {
     print_header "Smoke Test Pipeline (offline, 2 mã)"
     activate_venv
-    python3 "$BACKEND_DIR/main.py" --no-fetch --limit 2
+    "$VENV_PYTHON" "$BACKEND_DIR/main.py" --no-fetch --limit 2
 }
 
 cmd_evaluate() {
     print_header "Đánh Giá ML Walk-Forward"
     activate_venv
-    cd "$BACKEND_DIR" && python3 -m src.models.evaluate "$@"
+    cd "$BACKEND_DIR" && "$VENV_PYTHON" -m src.models.evaluate "$@"
 }
 
 cmd_tune() {
     print_header "Tune RF + XGBoost"
     activate_venv
-    cd "$BACKEND_DIR" && python3 -m src.models.tune "$@"
+    cd "$BACKEND_DIR" && "$VENV_PYTHON" -m src.models.tune "$@"
 }
 
 cmd_clear_data() {
@@ -236,7 +279,7 @@ cmd_status() {
     if [ -f "$BACKEND_DIR/data/market.sqlite3" ]; then
         echo -e "   SQLite: ${CYAN}$BACKEND_DIR/data/market.sqlite3${NC}"
         activate_venv
-        (cd "$BACKEND_DIR" && python3 -c 'from src.data import store; print("   Phiên mới nhất:", store.latest_date("VNINDEX") or "chưa có")')
+        (cd "$BACKEND_DIR" && "$VENV_PYTHON" -c 'from src.data import store; print("   Phiên mới nhất:", store.latest_date("VNINDEX") or "chưa có")')
     else
         echo -e "   SQLite: ${RED}chưa có (CSV cũ sẽ được nhập khi chạy)${NC}"
     fi

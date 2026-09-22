@@ -1,7 +1,14 @@
 """Atomic snapshot cache shared by the producer and read-only web workers."""
 
-import fcntl
 import json
+import os
+import sys
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,12 +31,22 @@ def source_stamp() -> list[list[int | str]]:
 @contextmanager
 def build_lock():
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     with LOCK_PATH.open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
         try:
+            if sys.platform == "win32":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+
             yield
+
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def read_snapshot() -> dict:
